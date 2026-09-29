@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- GENEL AYARLAR -->
+    <PreferenceCategory
+        android:title="Kamera Tercihleri"
+        android:layout="@layout/preference_category_frutiger">
+
+        <SwitchPreferenceCompat
+            android:key="pref_capture_sound"
+            android:title="Deklanşör Sesi"
+            android:defaultValue="true"
+            android:layout="@layout/preference_item_frutiger" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_volume_capture"
+            android:title="Ses Tuşları ile Çekim"
+            android:summary="Ses artırma/azaltma tuşu ile fotoğraf çek"
+            android:defaultValue="true"
+            android:layout="@layout/preference_item_frutiger" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_location_tagging"
+            android:title="Konum Etiketi"
+            android:summary="Fotoğrafların EXIF verisine GPS konumunu kaydet"
+            android:defaultValue="false"
+            android:layout="@layout/preference_item_frutiger" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_histogram"
+            android:title="Canlı Histogram"
+            android:summary="Vizör üzerinde canlı RGB/Luma dağılım grafiği göster"
+            android:defaultValue="false"
+            android:layout="@layout/preference_item_frutiger" />
+    </PreferenceCategory>
+
+    <!-- VİDEO AYARLARI -->
+    <PreferenceCategory
+        android:title="Video"
+        android:layout="@layout/preference_category_frutiger">
+
+        <ListPreference
+            android:key="pref_video_quality"
+            android:title="Video Çözünürlüğü"
+            android:entries="@array/video_quality_entries"
+            android:entryValues="@array/video_quality_values"
+            android:defaultValue="fhd"
+            android:layout="@layout/preference_item_frutiger" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_video_stabilization"
+            android:title="Video Sabitleme (OIS + EIS)"
+            android:summary="Sarsıntısız akıcı video kaydı"
+            android:defaultValue="true"
+            android:layout="@layout/preference_item_frutiger" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

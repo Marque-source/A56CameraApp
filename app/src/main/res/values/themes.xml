@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Ana tema — Material Design 3, tam siyah, ActionBar YOK -->
+    <style name="Theme.A56Camera" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/accent_blue</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSecondary">@color/accent_yellow</item>
+        <item name="android:colorBackground">@color/black</item>
+        <item name="colorSurface">@color/surface_dark</item>
+        <item name="android:windowBackground">@color/black</item>
+        <item name="android:statusBarColor">@color/black</item>
+        <item name="android:navigationBarColor">@color/black</item>
+        <!-- Başlık/ActionBar hiçbir koşulda gösterilmesin -->
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <!-- Tam ekran kamera teması (ActionBar YOK) -->
+    <style name="Theme.A56Camera.Fullscreen" parent="Theme.A56Camera">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/black</item>
+    </style>
+
+    <!-- Deklanşör butonu stili -->
+    <style name="ShutterButton">
+        <item name="android:layout_width">72dp</item>
+        <item name="android:layout_height">72dp</item>
+        <item name="android:background">@drawable/bg_shutter</item>
+    </style>
+    <style name="CircleShapeAppearance" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">50%</item>
+    </style>
+</resources>

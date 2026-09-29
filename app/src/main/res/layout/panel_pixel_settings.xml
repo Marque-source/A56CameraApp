@@ -1,0 +1,487 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/cardPixelSettings"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="16dp"
+    android:orientation="vertical"
+    android:background="@drawable/bg_pixel_sheet"
+    android:padding="16dp"
+    android:elevation="12dp">
+
+    <!-- BAŞLIK & KAPATMA BUTONU -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:id="@+id/tvPixelSettingsTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Video Ayarları"
+            android:textColor="@color/white"
+            android:textSize="16sp"
+            android:fontFamily="sans-serif-medium"
+            android:textStyle="bold" />
+
+        <ImageButton
+            android:id="@+id/btnPixelSettingsClose"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:src="@drawable/ic_close"
+            android:background="@drawable/bg_circle_control_translucent"
+            android:scaleType="centerInside"
+            android:contentDescription="Kapat" />
+
+    </LinearLayout>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <!-- VİDEO AYARLARI BÖLÜMÜ -->
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/layoutVideoSettings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Çözünürlük -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ÇÖZÜNÜRLÜK"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:id="@+id/btnVideoResFhd"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="1080p FHD"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnVideoRes4k"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="4K UHD"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="6dp" />
+
+        </LinearLayout>
+
+        <!-- Kare Hızı (FPS) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="KARE HIZI (FPS)"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:id="@+id/btnVideoFps30"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="30 FPS"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnVideoFps60"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="60 FPS"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="6dp" />
+
+        </LinearLayout>
+
+        <!-- Stabilizasyon -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="VİDEO STABİLİZASYONU"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:id="@+id/btnVideoEisAuto"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Standart (Açık)"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnVideoEisOff"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Kapalı"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="6dp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvVideoSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Seçilen: 1080p @ 30 FPS"
+            android:textColor="@color/accent_yellow"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:layout_marginTop="4dp" />
+
+    </LinearLayout>
+
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <!-- FOTOĞRAF AYARLARI BÖLÜMÜ -->
+    <!-- ══════════════════════════════════════════════════════════════════ -->
+    <LinearLayout
+        android:id="@+id/layoutPhotoSettings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <!-- Çözünürlük -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ÇÖZÜNÜRLÜK"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:id="@+id/btnPhoto12Mp"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="12 MP (Hızlı)"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnPhoto50Mp"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="50 MP (Ultra)"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="6dp" />
+
+        </LinearLayout>
+
+        <!-- En Boy Oranı -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="EN-BOY ORANI"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:id="@+id/btnPhotoRatio43"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="4:3"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoRatio169"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="16:9"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginHorizontal="2dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoRatio11"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="1:1"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginHorizontal="2dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoRatioFull"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Tam"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="4dp" />
+
+        </LinearLayout>
+
+        <!-- Flaş -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="FLAŞ"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:id="@+id/btnPhotoFlashOff"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Kapalı"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoFlashAuto"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Otomatik"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginHorizontal="2dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoFlashOn"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Açık"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="4dp" />
+
+        </LinearLayout>
+
+        <!-- Zamanlayıcı -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ZAMANLAYICI"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:layout_marginBottom="14dp">
+
+            <TextView
+                android:id="@+id/btnPhotoTimerOff"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Kapalı"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoTimer3s"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="3 sn"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginHorizontal="2dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoTimer10s"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="10 sn"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="4dp" />
+
+        </LinearLayout>
+
+        <!-- Expert RAW -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="EXPERT RAW (16-BİT DNG)"
+            android:textColor="#A0FFFFFF"
+            android:textSize="11sp"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.05"
+            android:layout_marginBottom="6dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/btnPhotoRawOff"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Yalnızca JPEG"
+                android:textColor="@color/black"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_selected"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/btnPhotoRawOn"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="RAW + JPEG"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:fontFamily="sans-serif-medium"
+                android:background="@drawable/bg_pixel_pill_normal"
+                android:layout_marginStart="6dp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout>

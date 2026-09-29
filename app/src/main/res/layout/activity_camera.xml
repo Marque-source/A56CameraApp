@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black">
+
+    <!-- Kamera önizlemesi (Camera2 / TextureView) -->
+    <com.a56camera.ui.views.Camera2PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+    <!-- Izgara katmanı -->
+    <com.a56camera.ui.views.GridOverlayView
+        android:id="@+id/gridOverlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/previewView"
+        app:layout_constraintBottom_toBottomOf="@id/previewView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Odak halkası -->
+    <com.a56camera.ui.views.FocusRingView
+        android:id="@+id/focusRing"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="@id/previewView"
+        app:layout_constraintBottom_toBottomOf="@id/previewView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Histogram -->
+    <com.a56camera.ui.views.HistogramView
+        android:id="@+id/histogram"
+        android:layout_width="120dp"
+        android:layout_height="70dp"
+        android:layout_margin="12dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- AI Sahne Göstergesi (Exynos 1580 NPU) -->
+    <TextView
+        android:id="@+id/tvSceneBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_zoom_bar"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="center"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="6dp"
+        android:textColor="@color/accent_yellow"
+        android:textSize="12sp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/topBar" />
+
+    <!-- ÜST ÇUBUK -->
+    <!-- ÜST ÇUBUK (Google Pixel Minimalist Tarzı) -->
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="24dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:background="@android:color/transparent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageButton
+            android:id="@+id/btnSettings"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:src="@drawable/ic_settings"
+            android:background="@drawable/bg_glass_button"
+            android:contentDescription="@string/cd_settings"
+            android:scaleType="centerInside"
+            android:padding="10dp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- GOOGLE PIXEL QUICK SETTINGS PILL (Merkez Hap Buton) -->
+        <TextView
+            android:id="@+id/pillQuickSettings"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:gravity="center"
+            android:paddingHorizontal="18dp"
+            android:text="1080P • 30 FPS ▾"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:fontFamily="sans-serif-medium"
+            android:background="@drawable/bg_pixel_top_pill" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <View
+            android:layout_width="44dp"
+            android:layout_height="44dp" />
+
+        <ImageButton
+            android:id="@+id/btnFlash"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <!-- Eski butonlar (ViewBinding geriye dönük uyumluluk için gizli) -->
+        <TextView
+            android:id="@+id/btnResolution"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/btnAspectRatio"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/btnRaw"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/btnTimer"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <!-- SETTINGS SCRIM (Dışarıya dokununca paneli kapatır) -->
+    <View
+        android:id="@+id/viewSettingsScrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#60000000"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+    <!-- GOOGLE PIXEL HIZLI AYARLAR PANELİ -->
+    <include
+        android:id="@+id/panelPixelSettings"
+        layout="@layout/panel_pixel_settings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- PRO MOD KONTROL PANELİ (kaydırılabilir) -->
+    <include
+        android:id="@+id/proPanel"
+        layout="@layout/panel_pro_controls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/zoomBar" />
+
+    <!-- ZOOM BAR -->
+    <LinearLayout
+        android:id="@+id/zoomBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:padding="6dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_zoom_pill"
+        app:layout_constraintBottom_toTopOf="@id/bottomPanel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/btnZoomUltra"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text=".5"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:fontFamily="sans-serif-medium"
+            android:background="@drawable/bg_circle_control_translucent" />
+
+        <TextView
+            android:id="@+id/btnZoomWide"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginHorizontal="8dp"
+            android:gravity="center"
+            android:text="1"
+            android:textColor="@color/black"
+            android:textSize="14sp"
+            android:fontFamily="sans-serif-medium"
+            android:background="@drawable/bg_zoom_button_selected" />
+
+        <TextView
+            android:id="@+id/btnZoomTele"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:gravity="center"
+            android:text="2"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:fontFamily="sans-serif-medium"
+            android:background="@drawable/bg_circle_control_translucent" />
+    </LinearLayout>
+
+    <!-- KAYAN ZOOM ORAN ETİKETİ (pinch sırasında görünür) -->
+    <TextView
+        android:id="@+id/zoomRatioLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="52dp"
+        android:gravity="center"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:layout_marginBottom="8dp"
+        android:text="1.0x"
+        android:textColor="@color/accent_yellow"
+        android:textStyle="bold"
+        android:textSize="14sp"
+        android:background="@drawable/bg_zoom_bar"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/zoomBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- ALT PANEL -->
+    <LinearLayout
+        android:id="@+id/bottomPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@android:color/transparent"
+        android:paddingBottom="32dp"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <!-- Mod seçici (yatay kaydırma) -->
+        <HorizontalScrollView
+            android:id="@+id/modeSelector"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:overScrollMode="never"
+            android:paddingVertical="16dp">
+
+            <com.a56camera.ui.views.ModeSelector
+                android:id="@+id/modeContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="16dp" />
+        </HorizontalScrollView>
+
+        <!-- Deklanşör satırı -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="120dp">
+
+            <!-- Galeri thumbnail (sol) -->
+            <com.google.android.material.imageview.ShapeableImageView
+                android:id="@+id/btnGallery"
+                android:layout_width="60dp"
+                android:layout_height="60dp"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:layout_marginStart="32dp"
+                android:scaleType="centerCrop"
+                android:background="#26000000"
+                app:shapeAppearanceOverlay="@style/CircleShapeAppearance"
+                android:contentDescription="@string/cd_gallery" />
+
+            <!-- Deklanşör (orta) — büyük beyaz daire (Pixel tarzı) -->
+            <FrameLayout
+                android:id="@+id/btnShutter"
+                android:layout_width="88dp"
+                android:layout_height="88dp"
+                android:layout_centerInParent="true"
+                android:foreground="?attr/selectableItemBackgroundBorderless">
+
+                <View
+                    android:id="@+id/shutterInner"
+                    android:layout_width="88dp"
+                    android:layout_height="88dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_shutter_pixel"
+                    android:contentDescription="@string/cd_shutter" />
+            </FrameLayout>
+
+            <!-- Kamera çevir (sağ) -->
+            <ImageButton
+                android:id="@+id/btnSwitchCamera"
+                android:layout_width="60dp"
+                android:layout_height="60dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:layout_marginEnd="32dp"
+                android:src="@drawable/ic_switch_camera"
+                android:background="@drawable/bg_circle_control_translucent"
+                android:scaleType="centerInside"
+                android:padding="14dp"
+                android:contentDescription="@string/cd_switch_camera" />
+        </RelativeLayout>
+    </LinearLayout>
+
+    <!-- Kayıt/işlem göstergesi (zamanlayıcı için) -->
+    <TextView
+        android:id="@+id/statusChip"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
+        android:background="@drawable/bg_zoom_bar"
+        android:textColor="@color/white"
+        android:textSize="13sp"
+        android:visibility="gone"
+        tools:text="00:12"
+        app:layout_constraintTop_toBottomOf="@id/topBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+
+
+    <!-- GECE MODU ANİMASYON PANELİ (Düz yazı yerine parlayan animasyon) -->
+    <LinearLayout
+        android:id="@+id/nightCaptureOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <FrameLayout
+            android:layout_width="120dp"
+            android:layout_height="120dp">
+
+            <!-- Dönen Altın Halka (Progress Indicator) -->
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/nightProgressRing"
+                android:layout_width="120dp"
+                android:layout_height="120dp"
+                android:indeterminate="true"
+                app:indicatorColor="@color/accent_yellow"
+                app:trackColor="#33FFFFFF"
+                app:trackThickness="4dp" />
+
+            <!-- Parlayan Ay İkonu -->
+            <ImageView
+                android:id="@+id/nightMoonIcon"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_moon" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/nightCaptureLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="✨ Sabit Tutun..."
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:fontFamily="sans-serif-medium"
+            android:background="@drawable/bg_zoom_bar"
+            android:paddingHorizontal="18dp"
+            android:paddingVertical="7dp" />
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pixel Camera tarzı — tam siyah AMOLED paleti -->
+    <color name="black">#FF000000</color>
+    <color name="pure_black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="surface_dark">#FF121212</color>
+    <color name="surface_translucent">#99000000</color>
+    <color name="control_gray">#FF2A2A2A</color>
+    <color name="control_gray_light">#FF3C3C3C</color>
+    <color name="text_secondary">#FFB0B0B0</color>
+
+    <!-- Vurgu — Pixel mavi/sarı -->
+    <color name="accent_yellow">#FFFFCC00</color>
+    <color name="accent_blue">#FF8AB4F8</color>
+    <color name="shutter_white">#FFFFFFFF</color>
+    <color name="shutter_recording">#FFEA4335</color>
+
+    <!-- Histogram -->
+    <color name="histogram_red">#AAFF5252</color>
+    <color name="histogram_green">#AA69F0AE</color>
+    <color name="histogram_blue">#AA448AFF</color>
+    <color name="histogram_luma">#AAFFFFFF</color>
+
+    <!-- Odak halkası -->
+    <color name="focus_ring">#FFFFCC00</color>
+    <color name="focus_ring_locked">#FFFFCC00</color>
+    <color name="grid_line">#66FFFFFF</color>
+</resources>

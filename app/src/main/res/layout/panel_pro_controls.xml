@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/surface_translucent"
+    android:paddingVertical="8dp">
+
+    <!-- Aktif parametrenin ayar çubuğu -->
+    <LinearLayout
+        android:id="@+id/proSliderRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/proSliderValue"
+            android:layout_width="72dp"
+            android:layout_height="wrap_content"
+            android:textColor="@color/accent_yellow"
+            android:textSize="14sp"
+            android:text="AUTO" />
+
+        <com.google.android.material.slider.Slider
+            android:id="@+id/proSlider"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:valueFrom="0"
+            android:valueTo="100"
+            android:value="50"
+            android:stepSize="0.0" />
+    </LinearLayout>
+
+    <!-- Parametre butonları -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="4dp">
+
+        <include layout="@layout/item_pro_param" android:id="@+id/paramIso"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+        <include layout="@layout/item_pro_param" android:id="@+id/paramShutter"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+        <include layout="@layout/item_pro_param" android:id="@+id/paramFocus"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+        <include layout="@layout/item_pro_param" android:id="@+id/paramWb"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+        <include layout="@layout/item_pro_param" android:id="@+id/paramEv"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+        <include layout="@layout/item_pro_param" android:id="@+id/paramProfile"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1.2" />
+
+        <ImageButton
+            android:id="@+id/btnProReset"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:background="@drawable/bg_circle_control_translucent"
+            android:src="@drawable/ic_close"
+            android:scaleType="centerInside"
+            android:padding="7dp"
+            android:contentDescription="@string/pro_reset"
+            android:layout_marginEnd="4dp" />
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,60 @@
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="Çekim">
+
+        <SwitchPreferenceCompat
+            app:key="pref_volume_capture"
+            app:title="Ses Tuşuyla Çekim"
+            app:defaultValue="true" />
+
+        <SwitchPreferenceCompat
+            app:key="pref_location"
+            app:title="Konum Etiketleri"
+            app:summary="Fotoğraflara GPS verisi ekle"
+            app:defaultValue="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Fotoğraf">
+
+        <SwitchPreferenceCompat
+            app:key="pref_histogram"
+            app:title="Canlı Histogram"
+            app:summary="Ekranda RGB+Luma histogram göster"
+            app:defaultValue="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Video">
+
+        <ListPreference
+            app:key="pref_video_quality"
+            app:title="Video Çözünürlüğü"
+            app:entries="@array/video_quality_entries"
+            app:entryValues="@array/video_quality_values"
+            app:defaultValue="fhd"
+            app:useSimpleSummaryProvider="true" />
+
+        <ListPreference
+            app:key="pref_video_codec"
+            app:title="Video Kodlayıcı"
+            app:entries="@array/video_codec_entries"
+            app:entryValues="@array/video_codec_values"
+            app:defaultValue="h264"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="Time-Lapse">
+
+        <ListPreference
+            app:key="pref_timelapse_interval"
+            app:title="Kare Aralığı"
+            app:entries="@array/timelapse_interval_entries"
+            app:entryValues="@array/timelapse_interval_values"
+            app:defaultValue="1"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
