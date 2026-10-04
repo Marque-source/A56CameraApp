@@ -34,59 +34,23 @@ object ToneMapHelper {
         val highlightRoll: Float, // highlight rolloff
         val displayNameTr: String = ""
     ) {
-        /** Google Pixel 9 Real Tone & Doğal — Gerçekçi ten renkleri, derin temiz gölgeler, doğal renk bilimi */
+        /** Google Pixel Real Tone & Doğal — Gerçekçi ten renkleri, derin temiz gölgeler, doğal renk bilimi */
         PIXEL_NATURAL(
             gamma = 0.92f, contrast = 1.10f, saturation = 1.02f,
             warmth = 0.000f, shadowLift = 0.015f, highlightRoll = 0.96f,
             displayNameTr = "Google Pixel Doğal"
         ),
-        /** Apple iPhone 15/16 Photonic Engine — aydınlık, ferah, doğal gölgeler ve dengeli renk bilimi */
-        IPHONE_PHOTONIC(
-            gamma = 0.86f, contrast = 1.05f, saturation = 1.04f,
-            warmth = 0.010f, shadowLift = 0.035f, highlightRoll = 0.95f,
-            displayNameTr = "Apple Photonic"
-        ),
-        /** Leica Klasik (Leica Authentic) — Organik derin gölgeler, analog film kontrastı, sıfır yapaylık */
-        LEICA_NATURAL(
-            gamma = 0.90f, contrast = 1.22f, saturation = 1.02f,
-            warmth = 0.012f, shadowLift = 0.005f, highlightRoll = 0.92f,
-            displayNameTr = "Leica Klasik"
-        ),
-        /** Leica Canlı (Leica Vibrant) — Zengin renk doygunluğu, sinematik kırmızı/mavi ayrımı */
-        LEICA_VIVID(
-            gamma = 0.88f, contrast = 1.24f, saturation = 1.18f,
-            warmth = 0.018f, shadowLift = 0.008f, highlightRoll = 0.94f,
-            displayNameTr = "Leica Canlı"
-        ),
-        /** Hasselblad Doğal (HNCS) — Dünyanın en doğru cilt ve doğa renkleri, nötr mikro-tonlar */
-        HASSELBLAD_NATURAL(
-            gamma = 0.94f, contrast = 1.08f, saturation = 1.01f,
-            warmth = 0.000f, shadowLift = 0.015f, highlightRoll = 0.96f,
-            displayNameTr = "Hasselblad Doğal"
-        ),
         /** Leica Monokrom (True B&W) — Kadifemsi ton geçişli, yüksek dinamik aralıklı analog siyah-beyaz */
         PRO_MONOCHROME(
             gamma = 0.92f, contrast = 1.28f, saturation = 0.00f,
             warmth = 0.000f, shadowLift = 0.005f, highlightRoll = 0.90f,
-            displayNameTr = "Leica Monokrom"
+            displayNameTr = "Monokrom B&W"
         ),
         /** Pro Flat / Sinematik Log — Düzenleme (Lightroom) için maksimum dinamik aralık ve düz ton eğrisi */
         PRO_CINEMA_LOG(
             gamma = 1.05f, contrast = 0.88f, saturation = 0.90f,
             warmth = 0.000f, shadowLift = 0.060f, highlightRoll = 0.88f,
             displayNameTr = "Flat Log"
-        ),
-        /** Samsung S25 benzeri — canlı, parlak */
-        SAMSUNG_VIVID(
-            gamma = 0.88f, contrast = 1.18f, saturation = 1.12f,
-            warmth = 0.02f, shadowLift = 0.012f, highlightRoll = 0.95f,
-            displayNameTr = "Samsung Vivid"
-        ),
-        /** iPhone 14 dengeli doğal profil */
-        IPHONE_NATURAL(
-            gamma = 0.92f, contrast = 1.10f, saturation = 1.05f,
-            warmth = 0.01f, shadowLift = 0.008f, highlightRoll = 0.97f,
-            displayNameTr = "iPhone Doğal"
         ),
         /** Gece modu — ferah gölgeler, dengeli parlaklık ve doğal gece sıcaklığı */
         NIGHT(
@@ -115,7 +79,7 @@ object ToneMapHelper {
 
     fun applyToRequest(
         builder: CaptureRequest.Builder,
-        profile: ColorProfile = ColorProfile.IPHONE_PHOTONIC
+        profile: ColorProfile = ColorProfile.PIXEL_NATURAL
     ) {
         builder.set(
             CaptureRequest.TONEMAP_MODE,
@@ -414,64 +378,6 @@ object ToneMapHelper {
 
         Imgproc.cvtColor(gray, bgr, Imgproc.COLOR_GRAY2BGR)
         gray.release()
-    }
-
-    /**
-     * Leica Klasik & Canlı Renk Bilimi (Leica Authentic / Vibrant):
-     * Derin organik siyahlar (sıfır sütlü grilik), analog film mikro-kontrastı ve
-     * optik sokak fotoğrafçılığı tonları.
-     */
-    private fun applyLeicaColorScience(bgr: Mat, profile: ColorProfile) {
-        Log.i(TAG, "🔴 [applyLeicaColorScience] ÇAĞRILDI -> ${profile.displayNameTr}")
-        val lab = Mat()
-        Imgproc.cvtColor(bgr, lab, Imgproc.COLOR_BGR2Lab)
-        val labPlanes = mutableListOf<Mat>()
-        Core.split(lab, labPlanes)
-
-        // Leica mikro-kontrast (L-kanalı doku belirginleştirme)
-        val clahe = Imgproc.createCLAHE(1.14, org.opencv.core.Size(8.0, 8.0))
-        clahe.apply(labPlanes[0], labPlanes[0])
-
-        Core.merge(labPlanes, lab)
-        Imgproc.cvtColor(lab, bgr, Imgproc.COLOR_Lab2BGR)
-        lab.release()
-        labPlanes.forEach { it.release() }
-
-        // Leica Film Kontrast Eğrisi (Derin Siyah Çapası)
-        applyPhotonicCurve(bgr, profile)
-
-        // Leica Canlı ise zengin doygunluk ve sinematik sıcaklık
-        if (profile == ColorProfile.LEICA_VIVID) {
-            applySaturation(bgr, profile.saturation)
-        }
-        if (profile.warmth != 0f) {
-            applyWarmth(bgr, profile.warmth)
-        }
-    }
-
-    /**
-     * Hasselblad Doğal Renk Çözümü (HNCS - Hasselblad Natural Color Solution):
-     * Doğa ve portre çekimlerinde insan gözünün gördüğüyle %100 örtüşen
-     * pürüzsüz ton geçişleri ve nötr renk doğruluğu.
-     */
-    private fun applyHasselbladColorScience(bgr: Mat, profile: ColorProfile) {
-        Log.i(TAG, "📷 [applyHasselbladColorScience] ÇAĞRILDI -> Hasselblad HNCS")
-        val lab = Mat()
-        Imgproc.cvtColor(bgr, lab, Imgproc.COLOR_BGR2Lab)
-        val labPlanes = mutableListOf<Mat>()
-        Core.split(lab, labPlanes)
-
-        // Çok yumuşak mikro-kontrast (karo sınırlarını hissettirmez)
-        val clahe = Imgproc.createCLAHE(1.05, org.opencv.core.Size(8.0, 8.0))
-        clahe.apply(labPlanes[0], labPlanes[0])
-
-        Core.merge(labPlanes, lab)
-        Imgproc.cvtColor(lab, bgr, Imgproc.COLOR_Lab2BGR)
-        lab.release()
-        labPlanes.forEach { it.release() }
-
-        // Doğal ton eğrisi
-        applyPhotonicCurve(bgr, profile)
     }
 
     /**

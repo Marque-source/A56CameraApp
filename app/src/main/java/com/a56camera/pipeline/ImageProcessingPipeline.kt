@@ -40,7 +40,7 @@ class ImageProcessingPipeline(private val context: Context) {
     )
 
     data class PipelineConfig(
-        val colorProfile: ToneMapHelper.ColorProfile = ToneMapHelper.ColorProfile.IPHONE_PHOTONIC,
+        val colorProfile: ToneMapHelper.ColorProfile = ToneMapHelper.ColorProfile.PIXEL_NATURAL,
         val denoiseEnabled: Boolean = true,
         val sharpenEnabled: Boolean = true,
         val hdrEnabled: Boolean = true,
@@ -168,9 +168,11 @@ class ImageProcessingPipeline(private val context: Context) {
 
         // ──── Adım 5: Zero-DCE AI Gece Görüşü (yalnızca gerçekten karanlık kalmışsa) ────
         if (config.lowLightEnhanceEnabled) {
-            // Önce mevcut parlaklığı ölç — zaten yeterince aydınlıksa Zero-DCE atla
-            val probeZdc = org.opencv.core.Mat(currentBitmap.height, currentBitmap.width, org.opencv.core.CvType.CV_8UC4)
-            org.opencv.android.Utils.bitmapToMat(currentBitmap, probeZdc)
+            // Önce mevcut parlaklığı ölç (hızlı 64x64 thumbnail ile) — zaten yeterince aydınlıksa Zero-DCE atla
+            val thumb = Bitmap.createScaledBitmap(currentBitmap, 64, 64, false)
+            val probeZdc = org.opencv.core.Mat(64, 64, org.opencv.core.CvType.CV_8UC4)
+            org.opencv.android.Utils.bitmapToMat(thumb, probeZdc)
+            thumb.recycle()
             val probeMean = org.opencv.core.Core.mean(probeZdc).`val`.take(3).average()
             probeZdc.release()
 
@@ -210,14 +212,17 @@ class ImageProcessingPipeline(private val context: Context) {
         }
 
         var savedRawUri: Uri? = null
-        if (config.saveToGallery && config.expertRawEnabled && rawMat16u != null) {
-            onProgress?.invoke("Expert RAW (16-bit DNG) kaydediliyor...")
-            savedRawUri = saveDngToGallery(
-                raw16u = rawMat16u,
-                iso = iso,
-                exposureNs = referenceResult.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 33_000_000L
-            )
-            rawMat16u.release()
+        try {
+            if (config.saveToGallery && config.expertRawEnabled && rawMat16u != null) {
+                onProgress?.invoke("Expert RAW (16-bit DNG) kaydediliyor...")
+                savedRawUri = saveDngToGallery(
+                    raw16u = rawMat16u,
+                    iso = iso,
+                    exposureNs = referenceResult.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 33_000_000L
+                )
+            }
+        } finally {
+            rawMat16u?.release()
         }
 
         var savedUri: Uri? = null
@@ -275,12 +280,12 @@ class ImageProcessingPipeline(private val context: Context) {
                 lowLightEnhanceEnabled = false
             )
             iso > 400 -> PipelineConfig(
-                colorProfile = ToneMapHelper.ColorProfile.IPHONE_PHOTONIC,
+                colorProfile = ToneMapHelper.ColorProfile.PIXEL_NATURAL,
                 denoiseEnabled = true,
                 hdrEnabled = true
             )
             else -> PipelineConfig(
-                colorProfile = ToneMapHelper.ColorProfile.IPHONE_PHOTONIC,
+                colorProfile = ToneMapHelper.ColorProfile.PIXEL_NATURAL,
                 denoiseEnabled = false,
                 hdrEnabled = true
             )

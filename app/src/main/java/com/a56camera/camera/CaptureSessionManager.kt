@@ -90,6 +90,10 @@ class CaptureSessionManager(private val bgHandler: Handler) {
 
     /** Tek kare çekim (fotoğraf). */
     fun capture(request: CaptureRequest, listener: CameraCaptureSession.CaptureCallback?) {
+        if (isHighSpeed) {
+            Log.w(TAG, "High speed oturumunda tek kare capture() desteklenmez, atlandı")
+            return
+        }
         try {
             session?.capture(request, listener, bgHandler)
         } catch (e: Exception) {
@@ -116,7 +120,13 @@ class CaptureSessionManager(private val bgHandler: Handler) {
 
     fun setRepeatingBurst(requests: List<CaptureRequest>, listener: CameraCaptureSession.CaptureCallback?) {
         try {
-            session?.setRepeatingBurst(requests, listener, bgHandler)
+            val s = session
+            val finalRequests = if (isHighSpeed && s is CameraConstrainedHighSpeedCaptureSession && requests.size == 1) {
+                s.createHighSpeedRequestList(requests[0])
+            } else {
+                requests
+            }
+            s?.setRepeatingBurst(finalRequests, listener, bgHandler)
         } catch (e: Exception) {
             Log.e(TAG, "setRepeatingBurst hatası", e)
         }

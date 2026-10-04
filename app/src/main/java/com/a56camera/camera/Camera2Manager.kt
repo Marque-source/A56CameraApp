@@ -345,7 +345,9 @@ class Camera2Manager(
                             // PINTO / Exynos 1580 NPU Canlı Sahne Analizi (MobileNetV2)
                             val detection = sceneOptimizer.classifyScene(thumbnail, result)
                             thumbnail.recycle()
-                            colorProfile = detection.scene.targetProfile
+                            if (detection.confidence >= 0.50f && detection.scene != com.a56camera.pipeline.SceneOptimizer.SceneType.AUTO) {
+                                colorProfile = detection.scene.targetProfile
+                            }
                             mainPost { onSceneDetected?.invoke(detection) }
                         }
                     }
@@ -540,6 +542,7 @@ class Camera2Manager(
                     } else {
                         onError()
                     }
+                    try { result.bitmap.recycle() } catch (_: Throwable) {}
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "ZSL pipeline hatası", e)
@@ -604,6 +607,7 @@ class Camera2Manager(
                             } else {
                                 onError()
                             }
+                            try { result.bitmap.recycle() } catch (_: Throwable) {}
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "HDR pipeline hatası", e)
@@ -679,6 +683,7 @@ class Camera2Manager(
                             } else {
                                 onError()
                             }
+                            try { result.bitmap.recycle() } catch (_: Throwable) {}
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Gece V2 pipeline hatası", e)
@@ -719,7 +724,7 @@ class Camera2Manager(
                     try {
                         onProgress?.invoke("3D Derinlik Haritası (MiDaS NPU)...")
                         val config = com.a56camera.pipeline.ImageProcessingPipeline.PipelineConfig(
-                            colorProfile = com.a56camera.pipeline.ToneMapHelper.ColorProfile.IPHONE_PHOTONIC,
+                            colorProfile = com.a56camera.pipeline.ToneMapHelper.ColorProfile.PIXEL_NATURAL,
                             denoiseEnabled = true,
                             sharpenEnabled = true,
                             hdrEnabled = true,
@@ -741,6 +746,7 @@ class Camera2Manager(
                                 Log.d(TAG, "Portre çekimi tamamlandı: ${result.processingTimeMs}ms, ${result.frameCount} kare")
                                 onSaved(result.uri)
                             } else onError()
+                            try { result.bitmap.recycle() } catch (_: Throwable) {}
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Portre modu pipeline hatası", e)
@@ -848,6 +854,7 @@ class Camera2Manager(
             // Doğal ve temiz Camera2 pozlaması: Samsung 3A motorunu kör etmek yerine
             // sahneyi doğru ölçmesine izin veriyoruz, OIS ve FAST NR ile stabil burst alıyoruz.
             b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+            ExposureBracketingStrategy.applyEvShift(b, ch, ev)
             b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             b.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
             b.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
@@ -855,11 +862,10 @@ class Camera2Manager(
             b.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF)
             b.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST)
             if (isNight) {
-                b.set(CaptureRequest.CONTROL_AE_LOCK, true)
                 b.set(CaptureRequest.CONTROL_AWB_LOCK, true)
-                Log.i(TAG, "📷 [Doğal Gece Burst] AE=ON, AE_LOCK=ON, AWB_LOCK=ON, OIS=ON, NR=FAST")
+                Log.i(TAG, "📷 [Doğal Gece Burst] EV=$ev, AWB_LOCK=ON, OIS=ON, NR=FAST")
             } else {
-                Log.i(TAG, "📷 [Doğal Burst] AE=ON, OIS=ON, NR=FAST")
+                Log.i(TAG, "📷 [Doğal Burst] EV=$ev, OIS=ON, NR=FAST")
             }
             b.build()
         }
@@ -942,7 +948,9 @@ class Camera2Manager(
 
             for (i in 0 until count) {
                 val (frame, _) = collectedFrames[i]
-                val meta = collectedMetadata.getOrNull(i) ?: lastResult
+                val meta = collectedMetadata.find { it.get(CaptureResult.SENSOR_TIMESTAMP) == frame.timestampNs }
+                    ?: collectedMetadata.getOrNull(i)
+                    ?: lastResult
 
                 if (meta != null) {
                     collectedResults.add(frame to meta)
@@ -1043,20 +1051,24 @@ class Camera2Manager(
                         val dngUri = MediaStoreHelper.createDngUri(context, dngName)
                         if (dngUri != null) {
                             val decoded = android.graphics.BitmapFactory.decodeByteArray(outputBytes, 0, outputBytes.size)
-                            val mat8 = com.a56camera.pipeline.YuvConverter.bitmapToMat(decoded)
-                            decoded.recycle()
-                            val mat16 = org.opencv.core.Mat()
-                            mat8.convertTo(mat16, org.opencv.core.CvType.CV_16UC3, 257.0)
-                            mat8.release()
-
-                            val expNs = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-                            val isoVal = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                            MediaStoreHelper.openOutput(context, dngUri)?.use { os ->
-                                com.a56camera.pipeline.LinearDngWriter.writeDng(mat16, isoVal, expNs, os)
+                            if (decoded != null) {
+                                val mat8 = com.a56camera.pipeline.YuvConverter.bitmapToMat(decoded)
+                                decoded.recycle()
+                                val mat16 = org.opencv.core.Mat()
+                                try {
+                                    mat8.convertTo(mat16, org.opencv.core.CvType.CV_16UC3, 257.0)
+                                    val expNs = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
+                                    val isoVal = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
+                                    MediaStoreHelper.openOutput(context, dngUri)?.use { os ->
+                                        com.a56camera.pipeline.LinearDngWriter.writeDng(mat16, isoVal, expNs, os)
+                                    }
+                                    MediaStoreHelper.finalizePending(context, dngUri)
+                                    Log.i(TAG, "🌟 [Pro Mode Expert RAW] DNG kaydedildi: $dngUri")
+                                } finally {
+                                    mat8.release()
+                                    mat16.release()
+                                }
                             }
-                            MediaStoreHelper.finalizePending(context, dngUri)
-                            mat16.release()
-                            Log.i(TAG, "🌟 [Pro Mode Expert RAW] DNG kaydedildi: $dngUri")
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Pro DNG yazma hatası", e)

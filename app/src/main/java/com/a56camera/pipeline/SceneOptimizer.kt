@@ -35,12 +35,12 @@ class SceneOptimizer(private val context: Context) {
         val icon: String,
         val targetProfile: ToneMapHelper.ColorProfile
     ) {
-        AUTO("Otomatik", "✨", ToneMapHelper.ColorProfile.IPHONE_PHOTONIC),
-        PORTRAIT("Portre", "👤", ToneMapHelper.ColorProfile.IPHONE_PHOTONIC),
+        AUTO("Otomatik", "✨", ToneMapHelper.ColorProfile.PIXEL_NATURAL),
+        PORTRAIT("Portre", "👤", ToneMapHelper.ColorProfile.PIXEL_NATURAL),
         NIGHT("Gece Sahnesi", "🌙", ToneMapHelper.ColorProfile.NIGHT),
-        FOOD("Yemek", "🍽️", ToneMapHelper.ColorProfile.SAMSUNG_VIVID),
-        LANDSCAPE("Manzara & Doğa", "🌿", ToneMapHelper.ColorProfile.IPHONE_PHOTONIC),
-        SUNSET("Gün Batımı", "🌅", ToneMapHelper.ColorProfile.SAMSUNG_VIVID),
+        FOOD("Yemek", "🍽️", ToneMapHelper.ColorProfile.PIXEL_NATURAL),
+        LANDSCAPE("Manzara & Doğa", "🌿", ToneMapHelper.ColorProfile.PIXEL_NATURAL),
+        SUNSET("Gün Batımı", "🌅", ToneMapHelper.ColorProfile.PIXEL_NATURAL),
         DOCUMENT("Belge / Metin", "📄", ToneMapHelper.ColorProfile.NEUTRAL)
     }
 

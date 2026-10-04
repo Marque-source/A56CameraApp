@@ -75,9 +75,9 @@ data class YuvFrame(
                 val planes = image.planes ?: return null
                 if (planes.size < 3) return null
 
-                val yBuf = planes[0].buffer?.apply { rewind() } ?: return null
-                val uBuf = planes[1].buffer?.apply { rewind() } ?: return null
-                val vBuf = planes[2].buffer?.apply { rewind() } ?: return null
+                val yBuf = planes[0].buffer?.duplicate() ?: return null
+                val uBuf = planes[1].buffer?.duplicate() ?: return null
+                val vBuf = planes[2].buffer?.duplicate() ?: return null
 
                 val yRem = yBuf.remaining()
                 val uRem = uBuf.remaining()
@@ -120,6 +120,7 @@ data class YuvFrame(
                     awbMode = result?.get(CaptureResult.CONTROL_AWB_MODE)
                 )
             } catch (e: Throwable) {
+                android.util.Log.e("YuvFrame", "YuvFrame.fromImage error: ${e.message}", e)
                 null
             }
         }

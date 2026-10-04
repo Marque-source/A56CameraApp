@@ -101,9 +101,6 @@ class CameraActivity : AppCompatActivity() {
             return
         }
 
-        // ARM64 NEON Donanım Hızlandırma Motorunu Başlat
-        com.a56camera.pipeline.NeonPipelineEngine.isHardwareAccelerated()
-
         videoCapture = VideoCapture(this)
         timeLapse = TimeLapseCapture(this)
         panorama = PanoramaCapture(this)
@@ -792,7 +789,7 @@ class CameraActivity : AppCompatActivity() {
         binding.btnShutter.setOnClickListener { onShutterPressed() }
         binding.btnShutter.setOnLongClickListener {
             if (!currentMode.isVideo) {
-                captureYuvBurstAndPipeline()
+                onShutterPressed()
                 true
             } else false
         }
@@ -1013,90 +1010,6 @@ class CameraActivity : AppCompatActivity() {
                 }
             }
         )
-    }
-
-    private fun captureYuvBurstAndPipeline() {
-        animateShutter()
-        binding.statusChip.isVisible = true
-        binding.statusChip.text = "YUV Burst & Pipeline İşleniyor..."
-
-        camera.captureBracketedBurst(
-            onComplete = { framesWithMeta ->
-                lifecycleScope.launch(Dispatchers.IO) {
-                    runBurstTests(framesWithMeta)
-                    runFullPipeline(framesWithMeta)
-                }
-            },
-            onError = { msg ->
-                runOnUiThread {
-                    binding.statusChip.isVisible = false
-                    Toast.makeText(this, "YUV Burst Hatası: $msg", Toast.LENGTH_LONG).show()
-                }
-            }
-        )
-    }
-
-    private suspend fun runBurstTests(
-        framesWithMeta: List<Pair<com.a56camera.camera.YuvFrame, android.hardware.camera2.TotalCaptureResult>>
-    ) = withContext(Dispatchers.IO) {
-        val testDir = File(getExternalFilesDir(null), "burst_test").apply { mkdirs() }
-
-        framesWithMeta.forEachIndexed { index, (frame, result) ->
-            val ev = frame.evShift
-            val iso = result.get(android.hardware.camera2.CaptureResult.SENSOR_SENSITIVITY)
-            val exp = result.get(android.hardware.camera2.CaptureResult.SENSOR_EXPOSURE_TIME)
-
-            val rgb = com.a56camera.pipeline.YuvConverter.toRgbMat(frame)
-            val output = File(testDir, "frame_${index}_ev${ev}_iso${iso}_exp${exp}.jpg")
-            org.opencv.imgcodecs.Imgcodecs.imwrite(output.absolutePath, rgb)
-            rgb.release()
-
-            android.util.Log.d("BurstTest", "Kaydedildi: ${output.name}")
-        }
-
-        withContext(Dispatchers.Main) {
-            Toast.makeText(
-                this@CameraActivity,
-                "${framesWithMeta.size} test karesi burst_test klasörüne kaydedildi",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }
-
-    private suspend fun runFullPipeline(
-        framesWithMeta: List<Pair<com.a56camera.camera.YuvFrame, android.hardware.camera2.TotalCaptureResult>>
-    ) = withContext(Dispatchers.Default) {
-        val yuvFrames = framesWithMeta.map { it.first }
-        val name = MediaStoreHelper.timestampName("IMG_YUV")
-        val uri = MediaStoreHelper.createImageUri(this@CameraActivity, "$name.jpg") ?: return@withContext
-
-        val tempFile = File(cacheDir, "$name.jpg")
-        val orientation = camera.currentDeviceRotationOrientation(deviceRotationDegrees())
-        val pipeline = com.a56camera.pipeline.FastPhotoPipeline()
-        val ok = pipeline.processBurst(yuvFrames, tempFile.absolutePath, orientation = orientation) { statusText ->
-            runOnUiThread {
-                binding.statusChip.isVisible = true
-                binding.statusChip.text = statusText
-            }
-        }
-
-        if (ok && tempFile.exists()) {
-            val bytes = tempFile.readBytes()
-            MediaStoreHelper.openOutput(this@CameraActivity, uri)?.use { it.write(bytes) }
-            MediaStoreHelper.finalizePending(this@CameraActivity, uri)
-            tempFile.delete()
-
-            withContext(Dispatchers.Main) {
-                binding.statusChip.isVisible = false
-                Toast.makeText(this@CameraActivity, "YUV Pipeline Fotoğrafı Kaydedildi!", Toast.LENGTH_LONG).show()
-                updateGalleryThumb(uri)
-            }
-        } else {
-            withContext(Dispatchers.Main) {
-                binding.statusChip.isVisible = false
-                Toast.makeText(this@CameraActivity, "Pipeline İşleme Başarısız", Toast.LENGTH_SHORT).show()
-            }
-        }
     }
 
     private fun toggleVideo() {

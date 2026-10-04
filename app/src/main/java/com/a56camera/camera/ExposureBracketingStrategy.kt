@@ -35,8 +35,8 @@ object ExposureBracketingStrategy {
     // -0.4 EV: Geçiş aydınlatması ve orta ton detayları.
     // 0.0 EV x 3: Gölgeler ve binalar için foton istifleme (temiz düşük gürültü).
     fun getEvShifts(isNight: Boolean): List<Float> =
-        if (isNight) listOf(0.0f, 0.0f, 0.0f, 0.0f, 0.0f)
-        else listOf(0.0f, 0.0f, 0.0f)
+        if (isNight) listOf(-1.0f, -0.4f, 0.0f, 0.0f, 0.0f)
+        else listOf(-0.5f, 0.0f, 0.0f)
 
     fun frameCount(isNight: Boolean) = getEvShifts(isNight).size
 
