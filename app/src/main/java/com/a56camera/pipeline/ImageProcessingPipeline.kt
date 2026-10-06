@@ -214,7 +214,7 @@ class ImageProcessingPipeline(private val context: Context) {
         var savedRawUri: Uri? = null
         try {
             if (config.saveToGallery && config.expertRawEnabled && rawMat16u != null) {
-                onProgress?.invoke("Expert RAW (16-bit DNG) kaydediliyor...")
+                onProgress?.invoke("16-Bit Linear DNG kaydediliyor...")
                 savedRawUri = saveDngToGallery(
                     raw16u = rawMat16u,
                     iso = iso,
@@ -263,7 +263,7 @@ class ImageProcessingPipeline(private val context: Context) {
                 LinearDngWriter.writeDng(raw16u, iso, exposureNs, os)
             }
             MediaStoreHelper.finalizePending(context, uri)
-            Log.i(TAG, "🌟 [Expert RAW DNG] Galeriye kaydedildi: $uri")
+            Log.i(TAG, "🌟 [16-Bit Linear DNG] Galeriye kaydedildi: $uri")
             return uri
         } catch (e: Exception) {
             Log.e(TAG, "DNG kaydetme hatası", e)

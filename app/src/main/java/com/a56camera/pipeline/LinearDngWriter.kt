@@ -11,36 +11,49 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * 16-Bit Computational Linear DNG (Adobe Digital Negative) Yazıcı.
+ * 16-Bit Computational Linear DNG (Adobe Digital Negative 1.4) Yazıcı.
  *
- * Çoklu kare birleştirmeden (Mertens Exposure Fusion) elde edilen 32-bit kayıpsız
- * HDR piksel verisini, 16-bit lineer RAW (0..65535) olarak Adobe DNG 1.4 formatında yazar.
+ * Çoklu kare birleştirmeden (Mertens Exposure Fusion) elde edilen 16-bit HDR piksel verisini,
+ * IEC 61966-2-1 doğrusal uzayında (Linear sRGB D65) Adobe DNG 1.4 formatında yazar.
  *
  * Üretilen DNG dosyaları:
  * - Adobe Lightroom Mobile & Desktop
  * - Adobe Photoshop / Camera Raw
  * - Snapseed
  * - Darktable & RawTherapee
- * tarafından resmi Sony IMX906 renk matrisleri ve 16-bit dinamik aralıkla tanınır.
+ * tarafından standart D65 referans profili ve 16-bit doğrusal dinamik aralıkla tanınır.
  */
 object LinearDngWriter {
 
     private const val TAG = "LinearDngWriter"
 
-    // Sony IMX906 Donanım Kalibrasyon Matrisleri (Samsung Exynos 1580 Dumpsys'den birebir tescillidir)
-    // android.sensor.colorTransform1:
-    private val COLOR_TRANSFORM_1 = longArrayOf(
-        593, 1024,   78, 1024,  -118, 1024,
-        -491, 1024, 1412, 1024,    72, 1024,
-        -137, 1024,  417, 1024,   428, 1024
+    // Standart sRGB / Rec.709 -> CIE 1931 XYZ (D65) Dönüşüm Matrisi (Adobe DNG 1.4 Standartı)
+    // ForwardMatrix1: sRGB -> XYZ (D65)
+    private val FORWARD_MATRIX_D65 = longArrayOf(
+        4124, 10000, 3576, 10000, 1804, 10000,
+        2126, 10000, 7152, 10000,  722, 10000,
+         193, 10000, 1192, 10000, 9505, 10000
     )
 
-    // android.sensor.forwardMatrix1:
-    private val FORWARD_MATRIX_1 = longArrayOf(
-        893, 1024, -200, 1024,   294, 1024,
-        317, 1024,  697, 1024,    10, 1024,
-        -16, 1024, -557, 1024,  1418, 1024
+    // ColorMatrix1: CIE 1931 XYZ (D65) -> sRGB Dönüşüm Matrisi (Adobe DNG Standartı)
+    private val COLOR_MATRIX_D65 = longArrayOf(
+        32405, 10000, -15371, 10000, -4985, 10000,
+        -9693, 10000,  18760, 10000,   416, 10000,
+          556, 10000,  -2040, 10000, 10572, 10000
     )
+
+    // IEC 61966-2-1 standardına uygun hızlı 16-bit De-Gamma Tablosu (sRGB -> Linear Light)
+    private val DEGAMMA_LUT: ShortArray by lazy {
+        ShortArray(65536) { i ->
+            val norm = i.toDouble() / 65535.0
+            val linear = if (norm <= 0.04045) {
+                norm / 12.92
+            } else {
+                Math.pow((norm + 0.055) / 1.055, 2.4)
+            }
+            (linear * 65535.0).toInt().coerceIn(0, 65535).toShort()
+        }
+    }
 
     /**
      * 16-bit BGR Mat'i Adobe Linear DNG (RGB) olarak OutputStream'e yazar.
@@ -74,11 +87,11 @@ object LinearDngWriter {
             // TIFF Header ve IFD Verilerini Hazırla
             val dataStream = ByteArrayOutputStream()
 
-            fun writeAscii(str: String): Int {
+            fun writeAscii(str: String): Pair<Int, Int> {
                 val offset = dataStream.size()
                 val bytes = (str + "\u0000").toByteArray(Charsets.US_ASCII)
                 dataStream.write(bytes)
-                return offset
+                return offset to bytes.size
             }
 
             fun writeShortArray(arr: ShortArray): Int {
@@ -111,10 +124,10 @@ object LinearDngWriter {
 
             // Yardımcı veri bloklarını doldur (Data Stream içinde bağıl adresler)
             val bitsPerSampleRel = writeShortArray(shortArrayOf(16, 16, 16))
-            val makeRel = writeAscii("Samsung")
-            val modelRel = writeAscii("Galaxy A56 5G")
-            val softwareRel = writeAscii("A56 Computational Expert RAW 1.0")
-            val cameraModelRel = writeAscii("Samsung Galaxy A56 5G (Sony IMX906)")
+            val (makeRel, makeCount) = writeAscii("Samsung")
+            val (modelRel, modelCount) = writeAscii("Galaxy A56 5G")
+            val (softwareRel, softwareCount) = writeAscii("A56 Camera 16-Bit Linear HDR DNG")
+            val (cameraModelRel, cameraModelCount) = writeAscii("Samsung Galaxy A56 5G")
 
             val xResRel = writeRational(72, 1)
             val yResRel = writeRational(72, 1)
@@ -126,8 +139,8 @@ object LinearDngWriter {
             val fNumberRel = writeRational(18, 10) // f/1.8
             val focalLengthRel = writeRational(554, 100) // 5.54mm
 
-            val forwardMatRel = writeSRationalArray(FORWARD_MATRIX_1)
-            val colorMatRel = writeSRationalArray(COLOR_TRANSFORM_1)
+            val forwardMatRel = writeSRationalArray(FORWARD_MATRIX_D65)
+            val colorMatRel = writeSRationalArray(COLOR_MATRIX_D65)
             val asShotNeutralRel = writeSRationalArray(longArrayOf(1, 1, 1, 1, 1, 1))
 
             // IFD0 Girişleri (Toplam 29 Etiket — TIFF Standartlarına göre Etiket ID'sine göre artan sırada!)
@@ -158,8 +171,8 @@ object LinearDngWriter {
             putTag(258, 3, 3, bitsPerSampleRel, true)                        // BitsPerSample [16, 16, 16]
             putTag(259, 3, 1, 1, false)                                      // Compression (1 = Uncompressed)
             putTag(262, 3, 1, 34892, false)                                  // PhotometricInterpretation (34892 = LinearRaw)
-            putTag(271, 2, 8, makeRel, true)                                 // Make ("Samsung")
-            putTag(272, 2, 14, modelRel, true)                               // Model ("Galaxy A56 5G")
+            putTag(271, 2, makeCount, makeRel, true)                         // Make ("Samsung")
+            putTag(272, 2, modelCount, modelRel, true)                       // Model ("Galaxy A56 5G")
             putTag(273, 4, 1, pixelDataOffset, false)                        // StripOffsets
             putTag(274, 3, 1, 1, false)                                      // Orientation (1 = Top-Left)
             putTag(277, 3, 1, 3, false)                                      // SamplesPerPixel (3)
@@ -169,7 +182,7 @@ object LinearDngWriter {
             putTag(283, 5, 1, yResRel, true)                                 // YResolution
             putTag(284, 3, 1, 1, false)                                      // PlanarConfiguration (1 = Chunky)
             putTag(296, 3, 1, 2, false)                                      // ResolutionUnit (2 = Inches)
-            putTag(305, 2, 33, softwareRel, true)                            // Software
+            putTag(305, 2, softwareCount, softwareRel, true)                 // Software
             putTag(33434, 5, 1, expTimeRel, true)                            // ExposureTime
             putTag(33437, 5, 1, fNumberRel, true)                            // FNumber
             putTag(34855, 3, 1, iso.coerceIn(50, 65535), false)              // ISOSpeedRatings
@@ -181,7 +194,7 @@ object LinearDngWriter {
             putTag(50706, 1, 4, dngVersionPacked, false)                     // DNGVersion
             val dngBackVersionPacked = (1 and 0xFF) or ((1 and 0xFF) shl 8)
             putTag(50707, 1, 4, dngBackVersionPacked, false)                 // DNGBackwardVersion
-            putTag(50708, 2, 35, cameraModelRel, true)                       // UniqueCameraModel
+            putTag(50708, 2, cameraModelCount, cameraModelRel, true)         // UniqueCameraModel
             putTag(50710, 10, 9, forwardMatRel, true)                        // ForwardMatrix1
             putTag(50721, 10, 9, colorMatRel, true)                          // ColorMatrix1
             putTag(50728, 5, 3, asShotNeutralRel, true)                      // AsShotNeutral
@@ -210,7 +223,8 @@ object LinearDngWriter {
                 bufferedOut.write(ByteArray(pixelDataOffset - currentOffset))
             }
 
-            // 5. 16-Bit RGB Piksel Akışı (Kayıpsız, Akış Halinde)
+            // 5. 16-Bit Doğrusal RGB Piksel Akışı (De-Gamma ile Gerçek Linear Light)
+            val lut = DEGAMMA_LUT
             val rowShorts = ShortArray(width * 3)
             val rowByteBuffer = ByteBuffer.allocate(width * 3 * 2).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -218,7 +232,9 @@ object LinearDngWriter {
                 rgb16u.get(row, 0, rowShorts)
                 rowByteBuffer.clear()
                 for (s in rowShorts) {
-                    rowByteBuffer.putShort(s)
+                    val unsignedVal = s.toInt() and 0xFFFF
+                    val linearShort = lut[unsignedVal]
+                    rowByteBuffer.putShort(linearShort)
                 }
                 bufferedOut.write(rowByteBuffer.array())
             }
@@ -226,7 +242,7 @@ object LinearDngWriter {
             bufferedOut.flush()
             val elapsed = System.currentTimeMillis() - startTime
             val sizeMb = (pixelDataOffset + pixelDataSize) / (1024.0 * 1024.0)
-            Log.i(TAG, "🌟 [Expert RAW DNG] Başarıyla yazıldı: ${width}x${height} (%.1f MB, %dms)".format(sizeMb, elapsed))
+            Log.i(TAG, "🌟 [16-Bit Linear DNG] Başarıyla yazıldı: ${width}x${height} (%.1f MB, %dms)".format(sizeMb, elapsed))
 
         } finally {
             rgb16u.release()

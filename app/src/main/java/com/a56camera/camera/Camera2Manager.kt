@@ -1044,7 +1044,7 @@ class Camera2Manager(
                 } catch (_: Exception) {}
                 MediaStoreHelper.finalizePending(context, uri)
 
-                // Expert RAW (16-bit DNG) Kaydı
+                // 16-Bit Linear DNG Kaydı
                 if (rawEnabled) {
                     try {
                         val dngName = MediaStoreHelper.timestampName("RAW")
@@ -1063,7 +1063,7 @@ class Camera2Manager(
                                         com.a56camera.pipeline.LinearDngWriter.writeDng(mat16, isoVal, expNs, os)
                                     }
                                     MediaStoreHelper.finalizePending(context, dngUri)
-                                    Log.i(TAG, "🌟 [Pro Mode Expert RAW] DNG kaydedildi: $dngUri")
+                                    Log.i(TAG, "🌟 [Pro Mode 16-bit DNG] DNG kaydedildi: $dngUri")
                                 } finally {
                                     mat8.release()
                                     mat16.release()
