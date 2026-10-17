@@ -68,6 +68,7 @@ class Camera2Manager(
     private val previewView: Camera2PreviewView
 ) {
     private val TAG = "Camera2Manager"
+    private val CONVERGENCE_TIMEOUT_MS = 1200L
     private val systemManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     private var bgThread: HandlerThread? = null
@@ -765,11 +766,52 @@ class Camera2Manager(
 
 
 
-    /** YUV_420_888 tabanlı Exposure Bracketed Burst çekimi yapar. */
+    /**
+     * YUV_420_888 tabanlı Exposure Bracketed Burst çekimi yapar.
+     *
+     * Çekimden önce otomatik pozlama ve beyaz dengesinin oturmasını (en fazla ~1,2 sn) bekler.
+     * A56 testinde mod değiştirdikten hemen sonra çekilen gece fotoğrafı, beyaz dengesi henüz
+     * oturmadığı için mor/pembe çıkıyordu; birkaç saniye sonraki çekim doğal renkteydi.
+     */
     fun captureBracketedBurst(
         frameCount: Int = 3,
         isNight: Boolean = false,
         onProgress: ((String) -> Unit)? = null,
+        onComplete: (List<Pair<YuvFrame, TotalCaptureResult>>) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val bg = bgHandler ?: return onError("Kamera hazır değil")
+        val start = android.os.SystemClock.uptimeMillis()
+        val check = object : Runnable {
+            override fun run() {
+                val waited = android.os.SystemClock.uptimeMillis() - start
+                if (isConverged(lastResult) || waited >= CONVERGENCE_TIMEOUT_MS) {
+                    if (waited >= CONVERGENCE_TIMEOUT_MS) Log.w(TAG, "AE/AWB oturmadan çekiliyor (${waited}ms)")
+                    captureBracketedBurstNow(frameCount, isNight, onProgress, onComplete, onError)
+                } else {
+                    bg.postDelayed(this, 40L)
+                }
+            }
+        }
+        bg.post(check)
+    }
+
+    /** Pozlama ve beyaz dengesi oturdu mu (ya da kilitli mi)? */
+    private fun isConverged(r: TotalCaptureResult?): Boolean {
+        r ?: return false
+        val ae = r.get(CaptureResult.CONTROL_AE_STATE)
+        val awb = r.get(CaptureResult.CONTROL_AWB_STATE)
+        val aeOk = ae == null || ae == CaptureResult.CONTROL_AE_STATE_CONVERGED ||
+            ae == CaptureResult.CONTROL_AE_STATE_LOCKED || ae == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED
+        val awbOk = awb == null || awb == CaptureResult.CONTROL_AWB_STATE_CONVERGED ||
+            awb == CaptureResult.CONTROL_AWB_STATE_LOCKED
+        return aeOk && awbOk
+    }
+
+    private fun captureBracketedBurstNow(
+        frameCount: Int,
+        isNight: Boolean,
+        onProgress: ((String) -> Unit)?,
         onComplete: (List<Pair<YuvFrame, TotalCaptureResult>>) -> Unit,
         onError: (String) -> Unit
     ) {
