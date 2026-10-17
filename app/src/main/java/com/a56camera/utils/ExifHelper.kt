@@ -62,7 +62,7 @@ object ExifHelper {
             exif.setAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL, offset)
             exif.setAttribute(ExifInterface.TAG_MAKE, android.os.Build.MANUFACTURER)
             exif.setAttribute(ExifInterface.TAG_MODEL, android.os.Build.MODEL)
-            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "A56 Kamera")
+            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Pixora")
 
             // sRGB Renk Uzayı Mührü (1 = sRGB):
             // Samsung AMOLED panelin renkleri kontrolsüzce Display P3'e gererek

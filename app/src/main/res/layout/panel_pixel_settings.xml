@@ -442,7 +442,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="EXPERT RAW (16-BİT DNG)"
+            android:text="RAW (16-BİT DNG)"
             android:textColor="#A0FFFFFF"
             android:textSize="11sp"
             android:fontFamily="sans-serif-medium"

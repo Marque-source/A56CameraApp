@@ -12,7 +12,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.a56camera"
+        applicationId = "io.github.marquesource.pixora"
         minSdk = 28
         targetSdk = 35
         versionCode = 1

@@ -43,7 +43,7 @@ object ToneMapHelper {
         PIXEL_NATURAL(
             gamma = 0.92f, contrast = 1.10f, saturation = 1.02f,
             warmth = 0.000f, shadowLift = 0.015f, highlightRoll = 0.96f,
-            displayNameTr = "Google Pixel Doğal"
+            displayNameTr = "Pixora Doğal"
         ),
         /** Leica Monokrom (True B&W) — Kadifemsi ton geçişli, yüksek dinamik aralıklı analog siyah-beyaz */
         PRO_MONOCHROME(

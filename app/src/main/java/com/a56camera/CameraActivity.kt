@@ -340,7 +340,7 @@ class CameraActivity : AppCompatActivity() {
                 proLimitHintShown = true
                 Toast.makeText(
                     this,
-                    "Bu telefon elle ISO, enstantane ve odak ayarını yalnızca Samsung'un kendi kamerasına açıyor. " +
+                    "Bu telefon elle ISO, enstantane ve odak ayarını başka kamera uygulamalarına açmıyor. " +
                         "Burada pozlama (EV), beyaz dengesi ve profil kullanılabilir.",
                     Toast.LENGTH_LONG
                 ).show()
@@ -658,9 +658,9 @@ class CameraActivity : AppCompatActivity() {
         }
         if (::camera.isInitialized) camera.rawEnabled = isExpertRawEnabled
         val msg = when {
-            !isExpertRawEnabled -> "Expert RAW Kapalı (Yalnızca JPEG)"
+            !isExpertRawEnabled -> "RAW kapalı (yalnızca JPEG)"
             ::camera.isInitialized && !camera.isRawSupported() -> "Bu kamera RAW desteklemiyor (yalnızca işlenmiş DNG)"
-            else -> "🌟 Expert RAW Aktif (JPEG + sensör DNG)"
+            else -> "RAW açık (JPEG + sensör DNG)"
         }
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
