@@ -32,7 +32,19 @@ class ExposureController {
     var evStep: Double = 1.0
         private set
 
+    /**
+     * Telefon üçüncü taraf uygulamalara elle ISO/enstantane ayarı izni veriyor mu?
+     * Galaxy A56 gibi "LIMITED" donanımlarda SENSOR_SENSITIVITY / SENSOR_EXPOSURE_TIME istek
+     * anahtarları hiç sunulmuyor; o durumda AE'yi kapatmak görüntüyü bozar, bu yüzden kapatılmaz.
+     */
+    var manualSupported: Boolean = false
+        internal set
+
     fun readRanges(ch: CameraCharacteristics) {
+        val keys = ch.availableCaptureRequestKeys
+        manualSupported = keys.contains(CaptureRequest.SENSOR_SENSITIVITY) &&
+            keys.contains(CaptureRequest.SENSOR_EXPOSURE_TIME)
+        if (!manualSupported) { manualIso = null; manualExposureNanos = null }
         ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.let { isoRange = it }
         ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.let { exposureRange = it }
         ch.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)?.let { evRange = it }
@@ -47,7 +59,7 @@ class ExposureController {
      * seçmek hiçbir şey değiştirmiyordu). Ayarlanmayan değer, otomatik pozlamanın son ölçtüğü
      * ışık miktarını koruyacak şekilde hesaplanır.
      */
-    fun isManual(): Boolean = manualIso != null || manualExposureNanos != null
+    fun isManual(): Boolean = manualSupported && (manualIso != null || manualExposureNanos != null)
 
     /** Otomatik pozlamanın son ölçümü (manuel moda geçmeden önceki sahne parlaklığı). */
     private var meteredIso: Int? = null
@@ -127,12 +139,12 @@ class ExposureController {
 
     // ---------- Slider dönüşümleri ----------
     fun setIsoFromProgress(p: Float) {
-        manualIso = if (p <= 0f) null else Camera2Utils.progressToIso(p, isoRange)
+        manualIso = if (p <= 0f || !manualSupported) null else Camera2Utils.progressToIso(p, isoRange)
     }
     fun isoProgress(): Float = manualIso?.let { Camera2Utils.isoToProgress(it, isoRange) } ?: 0f
 
     fun setShutterFromProgress(p: Float) {
-        manualExposureNanos = if (p <= 0f) null else Camera2Utils.progressToExposure(p, exposureRange)
+        manualExposureNanos = if (p <= 0f || !manualSupported) null else Camera2Utils.progressToExposure(p, exposureRange)
     }
     fun shutterProgress(): Float =
         manualExposureNanos?.let { Camera2Utils.exposureToProgress(it, exposureRange) } ?: 0f

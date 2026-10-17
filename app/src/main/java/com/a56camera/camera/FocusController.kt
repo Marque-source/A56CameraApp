@@ -40,6 +40,14 @@ class FocusController {
     var isFront: Boolean = false
         private set
 
+    /** Kamerada otomatik odak var mı? (A56'da ön ve ultra geniş kamera sabit odaklı.) */
+    var hasAf: Boolean = true
+        private set
+
+    /** Elle odak mesafesi (LENS_FOCUS_DISTANCE) uygulamalara açık mı? */
+    var manualFocusSupported: Boolean = false
+        private set
+
     fun readCharacteristics(ch: CameraCharacteristics) {
         minFocusDistance = ch.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
         maxRegionsAf = ch.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF) ?: 0
@@ -47,10 +55,15 @@ class FocusController {
         activeArray = ch.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
         sensorOrientation = ch.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
         isFront = ch.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        hasAf = ch.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)
+            ?.contains(CameraCharacteristics.CONTROL_AF_MODE_AUTO) == true
+        manualFocusSupported = hasAf && minFocusDistance > 0f &&
+            ch.availableCaptureRequestKeys.contains(CaptureRequest.LENS_FOCUS_DISTANCE)
+        if (!manualFocusSupported) manualFocusDistance = null
         clearTap()
     }
 
-    fun isManual(): Boolean = manualFocusDistance != null
+    fun isManual(): Boolean = manualFocusSupported && manualFocusDistance != null
 
     fun reset() { manualFocusDistance = null; clearTap() }
 
@@ -59,6 +72,12 @@ class FocusController {
     /** Sürekli/tekrarlayan isteğe odak modunu uygular. */
     fun applyTo(builder: CaptureRequest.Builder, forVideo: Boolean = false) {
         val tap = tapRegion
+        if (!hasAf) {
+            // Sabit odaklı kamera: desteklenmeyen AF modu istemek yerine AF kapalı; dokunma yalnızca pozlamayı ölçer.
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+            if (tap != null && maxRegionsAe > 0) builder.set(CaptureRequest.CONTROL_AE_REGIONS, arrayOf(tap))
+            return
+        }
         when {
             isManual() -> {
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
@@ -109,6 +128,7 @@ class FocusController {
 
     /** AF taramasını başlatır (tek seferlik tetik). */
     fun triggerAf(builder: CaptureRequest.Builder) {
+        if (!hasAf) return
         builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
         builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
     }
@@ -128,7 +148,7 @@ class FocusController {
 
     /** 0..1 ilerleme → odak mesafesi (0=sonsuz, min=makro). */
     fun setFocusFromProgress(p: Float) {
-        manualFocusDistance = if (p <= 0f) null else p * minFocusDistance
+        manualFocusDistance = if (p <= 0f || !manualFocusSupported) null else p * minFocusDistance
     }
     fun focusProgress(): Float =
         manualFocusDistance?.let { if (minFocusDistance > 0) it / minFocusDistance else 0f } ?: 0f

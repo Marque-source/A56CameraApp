@@ -168,6 +168,8 @@ class Camera2Manager(
 
     var onPreviewResult: ((TotalCaptureResult) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    /** Kamera her açıldığında (lens/ön-arka değişiminde de) çağrılır; arayüz yeteneklere göre güncellenir. */
+    var onCameraOpened: (() -> Unit)? = null
     var onSceneDetected: ((com.a56camera.pipeline.SceneOptimizer.DetectionResult) -> Unit)? = null
 
     /** Tek bir işleme hattı (ve tek set TFLite modeli) uygulama ömrü boyunca kullanılır. */
@@ -257,6 +259,7 @@ class Camera2Manager(
                     }
                     cameraDevice = device
                     createPreviewSession()
+                    onCameraOpened?.invoke()
                 }
 
                 override fun onDisconnected(device: CameraDevice) {
@@ -408,6 +411,17 @@ class Camera2Manager(
         if (stabModes?.contains(wanted) == true) {
             builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, wanted)
         }
+    }
+
+    /**
+     * 12MP'den büyük (ör. 50MP) fotoğraf bu kamerada uygulamalara açık mı?
+     * Galaxy A56'da 50MP yalnızca Samsung'un kendi kamerasına açık; uygulamalar en fazla 4080x3060 alır.
+     */
+    fun supportsHighResPhoto(): Boolean {
+        val map = characteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+        val sizes = (map.getHighResolutionOutputSizes(ImageFormat.JPEG) ?: emptyArray()) +
+            (map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray())
+        return sizes.any { it.width.toLong() * it.height > 20_000_000L }
     }
 
     /** Video sabitleme (EIS) bu kamerada var mı? */

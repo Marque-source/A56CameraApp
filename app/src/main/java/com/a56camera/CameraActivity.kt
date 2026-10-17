@@ -61,6 +61,7 @@ class CameraActivity : AppCompatActivity() {
 
     private enum class ProParam { NONE, ISO, SHUTTER, FOCUS, WB, EV, PROFILE }
     private var activeProParam = ProParam.NONE
+    private var proLimitHintShown = false
 
     private val proProfiles = listOf(
         com.a56camera.pipeline.ToneMapHelper.ColorProfile.PIXEL_NATURAL,
@@ -221,6 +222,7 @@ class CameraActivity : AppCompatActivity() {
     private fun initCamera() {
         histogramEnabled = prefs().getBoolean("pref_histogram", false)
         camera.onError = { msg -> runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() } }
+        camera.onCameraOpened = { runOnUiThread { if (!isFinishing && !isDestroyed) applyCapabilityUi() } }
         camera.onPreviewResult = {
             if (currentMode == CaptureMode.PRO) {
                 val now = System.currentTimeMillis()
@@ -334,6 +336,15 @@ class CameraActivity : AppCompatActivity() {
         if (isPro) {
             updateProBadge()
             refreshProLabels()
+            if (!proLimitHintShown && ::camera.isInitialized && !camera.exposure.manualSupported) {
+                proLimitHintShown = true
+                Toast.makeText(
+                    this,
+                    "Bu telefon elle ISO, enstantane ve odak ayarını yalnızca Samsung'un kendi kamerasına açıyor. " +
+                        "Burada pozlama (EV), beyaz dengesi ve profil kullanılabilir.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         } else {
             if (mode != CaptureMode.PHOTO) {
                 binding.tvSceneBadge.isVisible = false
@@ -655,6 +666,39 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private var is50MpEnabled = false
+
+    /**
+     * Açık kameranın gerçekten desteklediği seçenekleri etkin bırakır, desteklemediklerini soluklaştırır.
+     * (Galaxy A56: 50MP, 60 FPS, video sabitleme ve RAW üçüncü taraf uygulamalara kapalı.)
+     */
+    private fun applyCapabilityUi() {
+        if (!::camera.isInitialized) return
+        val p = binding.panelPixelSettings
+        fun setAvailable(v: android.view.View, ok: Boolean) { v.isEnabled = ok; v.alpha = if (ok) 1f else 0.35f }
+
+        val highRes = camera.supportsHighResPhoto()
+        if (!highRes && is50MpEnabled) toggleResolution()
+        binding.btnResolution.isVisible = highRes
+        setAvailable(p.btnPhoto50Mp, highRes)
+
+        val fps60 = camera.supportsVideo(1920, 1080, 60)
+        if (!fps60 && selectedVideoFps == 60) { selectedVideoFps = 30; prefs().edit().putInt("pref_video_fps", 30).apply() }
+        setAvailable(p.btnVideoFps60, fps60)
+
+        val uhd = camera.supportsVideo(3840, 2160, 30)
+        if (!uhd && selectedVideoRes == "uhd") { selectedVideoRes = "fhd"; prefs().edit().putString("pref_video_res", "fhd").apply() }
+        setAvailable(p.btnVideoRes4k, uhd)
+
+        val eis = camera.isVideoStabilizationSupported()
+        setAvailable(p.btnVideoEisAuto, eis)
+        if (!eis) selectedVideoEis = false
+
+        setAvailable(p.btnPhotoRawOn, camera.isRawSupported())
+
+        refreshVideoSettingsUi()
+        refreshPhotoSettingsUi()
+        if (currentMode == CaptureMode.PRO) refreshProLabels()
+    }
 
     private fun toggleResolution() {
         is50MpEnabled = !is50MpEnabled
@@ -1380,6 +1424,18 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun refreshProLabels() {
+        if (::camera.isInitialized) {
+            // Telefonun izin vermediği elle ayarları gizle (A56: ISO/enstantane/odak kapalı).
+            val panel = binding.proPanel
+            val isoOk = camera.exposure.manualSupported
+            val focusOk = camera.focus.manualFocusSupported
+            panel.paramIso.root.isVisible = isoOk
+            panel.paramShutter.root.isVisible = isoOk
+            panel.paramFocus.root.isVisible = focusOk
+            val hiddenActive = (!isoOk && (activeProParam == ProParam.ISO || activeProParam == ProParam.SHUTTER)) ||
+                (!focusOk && activeProParam == ProParam.FOCUS)
+            if (hiddenActive) { activeProParam = ProParam.NONE; panel.proSliderRow.isVisible = false }
+        }
         binding.proPanel.paramIso.paramValue.text = camera.exposure.isoLabel()
         binding.proPanel.paramShutter.paramValue.text = camera.exposure.shutterLabel()
         binding.proPanel.paramFocus.paramValue.text = camera.focus.focusLabel()

@@ -9,6 +9,7 @@ import com.a56camera.utils.Camera2Utils
 import com.a56camera.utils.ExifHelper
 import com.a56camera.utils.PermissionUtils
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,7 +67,7 @@ class CameraLogicTest {
     // ---------- Pro mod pozlama ----------
 
     @Test fun yalnizcaIso_manuelPozlamayiAcarVePerdeyiHesaplar() {
-        val e = ExposureController()
+        val e = ExposureController().apply { manualSupported = true }
         e.setIsoFromProgress(0.5f)
         assertTrue(e.isManual())
         val (iso, exp) = e.effectiveManualValues()
@@ -75,10 +76,18 @@ class CameraLogicTest {
     }
 
     @Test fun yalnizcaPerde_isoHesaplanir() {
-        val e = ExposureController()
+        val e = ExposureController().apply { manualSupported = true }
         e.manualExposureNanos = 8_333_333L   // 1/120 sn
         assertTrue(e.isManual())
         assertEquals(200, e.effectiveManualValues().first)
+    }
+
+    @Test fun telefonIzinVermiyorsa_manuelPozlamaDevreyeGirmez() {
+        // Galaxy A56: SENSOR_SENSITIVITY / SENSOR_EXPOSURE_TIME istek anahtarları yok
+        val e = ExposureController()
+        e.setIsoFromProgress(0.5f)
+        e.manualExposureNanos = 8_333_333L
+        assertFalse(e.isManual())
     }
 
     // ---------- Beyaz dengesi ----------
