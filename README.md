@@ -1,10 +1,11 @@
 # A56 Kamera 📷
 
 Samsung Galaxy A56 için **Google Pixel Camera tarzı**, tam özellikli **Native Android** kamera uygulaması.
-Kotlin + **saf Camera2 API** + Material Design 3 + Hilt ile geliştirilmiştir. CameraX **kullanılmaz** —
-tüm önizleme, çekim, video ve gelişmiş modlar doğrudan Camera2 (`android.hardware.camera2`) üzerine kuruludur.
-Galaxy A56 tam Camera2 donanım seviyesini (LEVEL_3) sunar; bu sayede manuel sensör kontrolü, RAW ve yüksek
-hızlı çekim tam olarak kullanılabilir.
+Kotlin + **Camera2 API** + Material Design 3 + Hilt ile geliştirilmiştir. Önizleme, çekim, video ve
+gelişmiş modlar doğrudan Camera2 (`android.hardware.camera2`) üzerine kuruludur. Projede CameraX
+bağımlılıkları ve deneysel `CameraXSession` / `CameraXExtensionsProbe` sınıfları bulunur ama uygulamanın
+çalışan akışı bunları kullanmaz. Manuel sensör kontrolü, RAW ve yüksek hızlı çekim cihazın Camera2
+yeteneklerine bağlıdır.
 
 ---
 
@@ -26,7 +27,7 @@ hızlı çekim tam olarak kullanılabilir.
 | **Panorama** | Jiroskop rehberli ardışık çekim + yatay birleştirme |
 | **Ağır Çekim** | Constrained high-speed oturum (720p@240 / 1080p@120, donanıma göre) |
 | **Hızlandırılmış** | Time-lapse (0.5s–30s aralık, MediaRecorder capture-rate) |
-| **RAW (DNG)** | Camera2 RAW_SENSOR + DngCreator ile RAW + JPEG eş zamanlı |
+| **RAW (DNG)** | Fotoğraf/Pro modunda Camera2 RAW_SENSOR + DngCreator ile JPEG + sensör DNG; Gece/Portre/HDR'da işlenmiş 16-bit doğrusal DNG |
 
 ### Pro Mod Kontrolleri
 - **ISO**: Auto, 50–3200 (logaritmik)
@@ -39,7 +40,7 @@ hızlı çekim tam olarak kullanılabilir.
 ### Ek Özellikler
 - Grid çizgileri (3x3 / kare / altın oran)
 - AF/AE kilidi (uzun basma)
-- GPS EXIF konum etiketleme
+- GPS EXIF konum etiketleme (Ayarlar → Konum Etiketi)
 - Ses tuşu ile çekim
 - MediaStore'a kayıt (DCIM/Camera)
 - Galeri thumbnail önizleme
@@ -50,8 +51,9 @@ hızlı çekim tam olarak kullanılabilir.
 ## 🛠️ Teknoloji
 
 - **Dil:** Kotlin
-- **Min SDK:** 26 (Android 8.0) · **Target SDK:** 35
-- **Kamera:** Saf **Camera2 API** (`android.hardware.camera2`) — CameraX yok
+- **Min SDK:** 28 (Android 9) · **Target/Compile SDK:** 34
+- **Kamera:** **Camera2 API** (`android.hardware.camera2`)
+- **Görüntü işleme:** OpenCV, TensorFlow Lite (sahne, Zero-DCE, MiDaS, Real-ESRGAN), ARM64 NEON (C++)
 - **DI:** Hilt (Dagger)
 - **UI:** Material Design 3, ViewBinding, önizleme için `TextureView`
 - **Görsel yükleme:** Glide
@@ -77,7 +79,6 @@ app/src/main/
 │   │   ├── WhiteBalanceController.kt # AWB / preset / manuel Kelvin
 │   │   ├── ZoomController.kt         # CONTROL_ZOOM_RATIO / CROP_REGION
 │   │   ├── NightModeCapture.kt       # Çok kareli uzun pozlama
-│   │   ├── SlowMotionCapture.kt      # Constrained high-speed kayıt
 │   │   ├── TimeLapseCapture.kt       # Hızlandırılmış kayıt
 │   │   ├── VideoCapture.kt           # MediaRecorder video (H.264/H.265)
 │   │   ├── PortraitMode.kt           # Yüz tespiti + yazılım bokeh
@@ -95,7 +96,7 @@ app/src/main/
 │       ├── MediaStoreHelper.kt       # DCIM/Camera kaydı (JPEG/DNG/video)
 │       ├── DngHelper.kt              # DngCreator ile RAW → DNG
 │       ├── ExifHelper.kt             # CaptureResult → EXIF + GPS
-│       └── HistogramCalculator.kt    # YUV → RGB/Luma histogram
+│       └── HistogramCalculator.kt    # Önizleme karesi → RGB/Luma histogram
 └── res/                              # Layout, drawable, values (Türkçe)
 ```
 
@@ -114,10 +115,7 @@ app/src/main/
 ```bash
 cd A56CameraApp
 
-# Gradle wrapper JAR'ı eksikse bir kez oluşturun:
-gradle wrapper --gradle-version 8.9
-
-# Debug APK derle
+# Debug APK derle (Gradle 8.13 wrapper ile otomatik indirilir)
 ./gradlew assembleDebug
 
 # APK çıktısı:
@@ -127,9 +125,9 @@ gradle wrapper --gradle-version 8.9
 ./gradlew installDebug
 ```
 
-> **Not:** `gradle-wrapper.jar` dosyası depoya dahil edilmemiştir. Android Studio ilk açılışta
-> otomatik oluşturur; komut satırında ise `gradle wrapper` komutunu bir kez çalıştırın
-> (sistemde Gradle 8.x kurulu olmalı).
+> **Gereksinimler:** JDK 17 veya üzeri (Android Studio'nun kendi JDK'sı yeterli), Android SDK 34,
+> NDK ve CMake 3.22.1 (C++ NEON çekirdeği için; Android Studio ilk derlemede kurmayı önerir).
+> SDK yolu `local.properties` içindeki `sdk.dir` ile verilir; bu dosya kişiye özel olduğu için depoya eklenmez.
 
 ---
 
@@ -137,14 +135,19 @@ gradle wrapper --gradle-version 8.9
 
 Uygulama ilk açılışta şu izinleri ister:
 `CAMERA`, `RECORD_AUDIO`, `READ_MEDIA_IMAGES/VIDEO` (zorunlu) ve
-`ACCESS_FINE_LOCATION` (GPS EXIF için, ayarlardan etkinleştirilir).
+`ACCESS_FINE_LOCATION` (GPS EXIF için; yalnızca Ayarlar → Konum Etiketi açıldığında istenir).
+
+Başka uygulamalar "fotoğraf çek" (`ACTION_IMAGE_CAPTURE`) isteğiyle bu uygulamayı açabilir; çekilen
+fotoğraf istenen `EXTRA_OUTPUT` konumuna yazılıp çağıran uygulamaya döndürülür.
 
 ---
 
 ## ⚠️ Cihaz Notları
 
-- **RAW (DNG)** ve **Gece/Portre** modları donanım desteğine bağlıdır; desteklenmeyen cihazlarda
-  otomatik olarak standart çekime düşülür veya "desteklenmiyor" uyarısı verilir.
+- **RAW (DNG)** ve **Gece/Portre** modları donanım desteğine bağlıdır. RAW akışı işleme akışlarıyla
+  birlikte açılamazsa uygulama RAW'ı kapatıp uyarı verir ve normal çekime devam eder.
+- **Gece/Portre braketi**, cihaz `MANUAL_SENSOR` destekliyorsa ISO ve perde süresi doğrudan
+  ayarlanarak çekilir; desteklemiyorsa AE telafisine düşer.
 - **Ultra geniş (0.6x)** modülü, cihazın fiziksel ultra geniş lensinden seçilir; yoksa ana kamera
   kullanılır.
 - **Test ve Doğrulama Durumu:** Proje, fiziksel **Samsung Galaxy A56 5G (SM-A566B, Android 15 / One UI 7, Exynos 1580)** üzerinde derlenmiş, kurulmuş ve tüm modları (Pixel Real Tone, 4K/1080p 60fps video, gece sahnesi, hızlı ayar paneli) test edilip doğrulanmıştır.

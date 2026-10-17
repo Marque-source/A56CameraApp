@@ -51,10 +51,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Diğer uygulamalardan görüntü/video yakalama -->
+            <!-- Diğer uygulamalardan fotoğraf çekme isteği (sonuç EXTRA_OUTPUT'a yazılır).
+                 VIDEO_CAPTURE henüz desteklenmediği için bildirilmiyor. -->
             <intent-filter>
                 <action android:name="android.media.action.IMAGE_CAPTURE" />
-                <action android:name="android.media.action.VIDEO_CAPTURE" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>

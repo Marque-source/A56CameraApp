@@ -21,6 +21,37 @@ object HistogramCalculator {
     )
 
     /**
+     * Önizleme karesinin küçük bir Bitmap kopyasından (TextureView.getBitmap) histogram hesaplar.
+     * Ek bir kamera akışı gerektirmez.
+     */
+    fun fromBitmap(bitmap: android.graphics.Bitmap, step: Int = 2): Histogram {
+        val hist = Histogram()
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        var y = 0
+        while (y < h) {
+            var x = 0
+            val row = y * w
+            while (x < w) {
+                val c = pixels[row + x]
+                val r = (c shr 16) and 0xFF
+                val g = (c shr 8) and 0xFF
+                val b = c and 0xFF
+                hist.red[r]++
+                hist.green[g]++
+                hist.blue[b]++
+                // BT.601 luma
+                hist.luma[((299 * r + 587 * g + 114 * b) / 1000).coerceIn(0, 255)]++
+                x += step
+            }
+            y += step
+        }
+        return hist
+    }
+
+    /**
      * YUV_420_888 Image'dan histogram hesaplar.
      * @param step örnekleme adımı (piksel atlama); büyük değer = daha hızlı, daha kaba
      */

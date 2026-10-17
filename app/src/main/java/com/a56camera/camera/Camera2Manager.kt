@@ -43,15 +43,22 @@ class PendingCaptureRequest(
     val colorProfile: com.a56camera.pipeline.ToneMapHelper.ColorProfile? = null,
     val isProMode: Boolean = false,
     val onProSaved: ((Uri, String) -> Unit)? = null,
+    /** Bu çekimde RAW_SENSOR karesi de istendi mi (gerçek DNG için)? */
+    val expectsRaw: Boolean = false,
+    /** DngCreator için çekimin yapıldığı kameranın karakteristikleri. */
+    val characteristics: CameraCharacteristics? = null,
     val createTime: Long = System.currentTimeMillis()
 ) {
     @Volatile var captureResult: TotalCaptureResult? = null
     @Volatile var jpegBytes: ByteArray? = null
+    /** RAW_SENSOR karesi; DNG yazıldıktan sonra kapatılır. */
+    @Volatile var rawImage: Image? = null
     private val completed = AtomicBoolean(false)
 
-    /** İki parça da hazırsa true döner (sadece bir kez). */
+    /** Gerekli tüm parçalar (metadata + JPEG + varsa RAW) hazırsa true döner (sadece bir kez). */
     fun tryComplete(): Boolean {
-        return captureResult != null && jpegBytes != null && !completed.getAndSet(true)
+        val rawReady = !expectsRaw || rawImage != null
+        return captureResult != null && jpegBytes != null && rawReady && !completed.getAndSet(true)
     }
 
     fun isCompleted(): Boolean = completed.get()
@@ -130,15 +137,27 @@ class Camera2Manager(
 
     private var extensionSession: CameraExtensionSession? = null
 
+    /**
+     * Expert RAW: açıkken oturuma gerçek RAW_SENSOR akışı eklenir ve fotoğraf çekimlerinde
+     * JPEG'in yanında DngCreator ile sensör verisinden DNG yazılır.
+     * Değişince oturum yeniden kurulur (RAW yüzeyi oturum yapılandırmasının parçası).
+     */
     var rawEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                restartSessionForAspectOrRes()
+            }
+        }
+
+    /** RAW akışı denenip oturum kurulamadıysa true — aynı kamerada tekrar denenmez. */
+    private var rawStreamUnsupported = false
 
     var onPreviewResult: ((TotalCaptureResult) -> Unit)? = null
-    var onYuvImage: ((Image) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onSceneDetected: ((com.a56camera.pipeline.SceneOptimizer.DetectionResult) -> Unit)? = null
 
     private lateinit var pipeline: com.a56camera.pipeline.ImageProcessingPipeline
-    private val zslRingBuffer = com.a56camera.pipeline.ZslRingBuffer(capacity = 8)
     private val sceneOptimizer by lazy { com.a56camera.pipeline.SceneOptimizer(context) }
     private var lastSceneAnalysisTimestamp = 0L
 
@@ -189,6 +208,7 @@ class Camera2Manager(
         isCameraClosing.set(false)
         currentInfo = info
         currentFacing = info.facing
+        rawStreamUnsupported = false
         val ch = systemManager.getCameraCharacteristics(info.id)
         characteristics = ch
         com.a56camera.utils.SamsungVendorTagsExplorer.dumpCameraVendorTags(ch, info.id)
@@ -256,6 +276,11 @@ class Camera2Manager(
     }
 
     private fun createStandardPreviewSession() {
+        val wantRaw = rawEnabled && currentInfo?.supportsRaw == true && !rawStreamUnsupported
+        createStandardPreviewSession(withRaw = wantRaw)
+    }
+
+    private fun createStandardPreviewSession(withRaw: Boolean) {
         val device = cameraDevice ?: return
         val ch = characteristics ?: return
         val readers = imageReaders ?: return
@@ -264,6 +289,9 @@ class Camera2Manager(
         previewSurface = previewView.createSurface() ?: return
         readers.closeAll()
         readers.setupJpeg(ch, aspectRatio, isHighRes50Mp) { image -> onJpegAvailable(image) }
+        if (withRaw) {
+            readers.setupRaw(ch) { image -> onRawAvailable(image) }
+        }
 
         setupYuvBurstReader(ch)
 
@@ -271,7 +299,6 @@ class Camera2Manager(
             add(previewSurface!!)
             readers.jpegSurface()?.let { add(it) }
             readers.rawSurface()?.let { add(it) }
-            readers.yuvSurface()?.let { add(it) }
             yuvBurstSurface?.let { add(it) }
         }
 
@@ -282,6 +309,15 @@ class Camera2Manager(
             }
             override fun onFailed(reason: String) {
                 if (isCameraClosing.get()) return
+                if (withRaw) {
+                    // Bu akış kombinasyonu (önizleme + JPEG + RAW + YUV) cihazda desteklenmiyor:
+                    // RAW'sız tekrar dene ki kamera hiç açılmamış gibi kalmasın.
+                    Log.w(TAG, "RAW akışıyla oturum kurulamadı ($reason), RAW'sız yeniden deneniyor")
+                    rawStreamUnsupported = true
+                    mainPost { onError?.invoke("Bu kamerada RAW + işleme akışı birlikte açılamadı, RAW kapatıldı") }
+                    mainPost { createStandardPreviewSession(withRaw = false) }
+                    return
+                }
                 onError?.invoke(reason)
             }
         })
@@ -369,12 +405,17 @@ class Camera2Manager(
         val jpegSurface = readers.jpegSurface() ?: return onErr()
 
         val orientation = jpegOrientation(ch, deviceRotation)
-        val pendingReq = PendingCaptureRequest(location, orientation, onSaved, onErr, colorProfile)
+        val rawSurface = if (rawEnabled) readers.rawSurface() else null
+        val pendingReq = PendingCaptureRequest(
+            location, orientation, onSaved, onErr, colorProfile,
+            expectsRaw = rawSurface != null,
+            characteristics = ch
+        )
         captureQueue.add(pendingReq)
 
         val builder = requestBuilder.build(
             device, ch, CameraDevice.TEMPLATE_STILL_CAPTURE,
-            listOf(jpegSurface), flashMode,
+            listOfNotNull(jpegSurface, rawSurface), flashMode,
             jpegOrientation = orientation, location = location
         ) ?: run {
             captureQueue.remove(pendingReq)
@@ -395,7 +436,7 @@ class Camera2Manager(
                 s: CameraCaptureSession, r: CaptureRequest,
                 failure: CaptureFailure
             ) {
-                captureQueue.remove(pendingReq)
+                discardRequest(pendingReq)
                 mainPost { onErr() }
             }
         })
@@ -429,6 +470,7 @@ class Camera2Manager(
         val jpegSurface = readers.jpegSurface() ?: return onError()
 
         val orientation = jpegOrientation(ch, deviceRotation)
+        val rawSurface = if (rawEnabled) readers.rawSurface() else null
         val pendingReq = PendingCaptureRequest(
             location = location,
             orientation = orientation,
@@ -436,7 +478,9 @@ class Camera2Manager(
             onError = onError,
             colorProfile = profile,
             isProMode = true,
-            onProSaved = onSaved
+            onProSaved = onSaved,
+            expectsRaw = rawSurface != null,
+            characteristics = ch
         )
         captureQueue.add(pendingReq)
 
@@ -450,6 +494,7 @@ class Camera2Manager(
         }
 
         builder.addTarget(jpegSurface)
+        rawSurface?.let { builder.addTarget(it) }
 
         // Manuel Pro Pozlama, Odak ve Beyaz Dengesi Korumalı Uygulama
         exposure.applyTo(builder)
@@ -478,16 +523,16 @@ class Camera2Manager(
                 tryFinishCapture(pendingReq)
             }
             override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
-                captureQueue.remove(pendingReq)
+                discardRequest(pendingReq)
                 mainPost { onError() }
             }
         })
     }
 
     /**
-     * Sıfır gecikmeli HDR çekim (ZSL - Zero Shutter Lag).
-     * Deklanşöre basıldığı an gecikme: 0ms!
-     * Tampondaki hazır en net kareleri anında kilitler ve işler.
+     * Eskiden "ZSL HDR" olarak anılan giriş noktası. Gerçek bir ZSL halka tamponu hiç
+     * doldurulmadığı için bu yol her zaman normal HDR'a düşüyordu; artık açıkça ona yönlendirir.
+     * (Gerçek ZSL için önizleme tekrarlayan isteğine tam çözünürlük YUV akışı eklemek gerekir.)
      */
     fun captureZslHdr(
         location: Location?,
@@ -495,63 +540,7 @@ class Camera2Manager(
         onProgress: ((String) -> Unit)? = null,
         onSaved: (Uri) -> Unit,
         onError: () -> Unit
-    ) {
-        val ch = characteristics ?: return onError()
-        val orientation = jpegOrientation(ch, deviceRotation)
-
-        zslRingBuffer.lockForCapture()
-        val zslFrames = zslRingBuffer.snapshotBestFrames(count = 5)
-
-        // Tampon henüz dolmadıysa normal HDR'a geç
-        if (zslFrames.size < 3) {
-            Log.d(TAG, "ZSL tamponu henüz hazır değil (${zslFrames.size} kare), normal HDR'a geçiliyor...")
-            zslRingBuffer.unlockAfterCapture()
-            captureHdr(location, deviceRotation, onProgress, onSaved, onError)
-            return
-        }
-
-        Log.d(TAG, "⚡ ZSL Tetiklendi: 0ms gecikmeyle ${zslFrames.size} kare alındı!")
-        onProgress?.invoke("Fotoğraf işleniyor...")
-
-        bgHandler?.post {
-            try {
-                val referenceResult = zslFrames[zslFrames.size / 2].second
-                val iso = referenceResult.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                val exposureNs = referenceResult.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-
-                val config = pipeline.autoConfig(iso, exposureNs).copy(
-                    colorProfile = colorProfile,
-                    superResolutionEnabled = zoom.currentRatio >= 1.8f,
-                    expertRawEnabled = rawEnabled,
-                    jpegQuality = 98,
-                    saveToGallery = true
-                )
-
-                val result = pipeline.process(
-                    frames = zslFrames,
-                    config = config,
-                    location = location,
-                    orientation = orientation,
-                    onProgress = { step -> mainPost { onProgress?.invoke(step) } }
-                )
-
-                mainPost {
-                    if (result.uri != null) {
-                        Log.d(TAG, "ZSL HDR tamamlandı: ${result.processingTimeMs}ms")
-                        onSaved(result.uri)
-                    } else {
-                        onError()
-                    }
-                    try { result.bitmap.recycle() } catch (_: Throwable) {}
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "ZSL pipeline hatası", e)
-                mainPost { onError() }
-            } finally {
-                zslRingBuffer.unlockAfterCapture()
-            }
-        }
-    }
+    ) = captureHdr(location, deviceRotation, onProgress, onSaved, onError)
 
     /**
      * HDR çekim: Bracketed burst -> multi-frame merge -> denoise -> kaydet.
@@ -776,9 +765,6 @@ class Camera2Manager(
         val ch = characteristics ?: return onError("Karakteristikler bulunamadı")
         val yuvSurface = yuvBurstSurface ?: return onError("YUV burst yüzeyi hazır değil")
 
-        // RAM'i rahatlatmak için ZSL tamponunu temizle (100MB boş bellek aç)
-        zslRingBuffer.clear()
-
         val bracket = lastResult?.let {
             ExposureBracketingStrategy.computeForScene(it, isNight)
         } ?: ExposureBracketingStrategy.BracketSettings(
@@ -841,6 +827,14 @@ class Camera2Manager(
             checkBurstComplete(actualFrameCount, completed, collectedFrames, collectedMetadata, collectedResults, onComplete)
         }
 
+        // Önizlemenin ölçtüğü pozlama; manuel braketin temeli
+        val meteredIso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY)
+        val meteredExp = lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        val useManualBracket = meteredIso != null && meteredExp != null &&
+            flashMode != FlashMode.ON && flashMode != FlashMode.TORCH &&
+            ExposureBracketingStrategy.supportsManualSensor(ch)
+        Log.i(TAG, "Braket yöntemi: ${if (useManualBracket) "manuel ISO/perde" else "AE telafisi"}")
+
         val requests = evShifts.mapNotNull { ev ->
             val b = requestBuilder.build(
                 device = device,
@@ -853,8 +847,12 @@ class Camera2Manager(
 
             // Doğal ve temiz Camera2 pozlaması: Samsung 3A motorunu kör etmek yerine
             // sahneyi doğru ölçmesine izin veriyoruz, OIS ve FAST NR ile stabil burst alıyoruz.
-            b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            ExposureBracketingStrategy.applyEvShift(b, ch, ev)
+            if (useManualBracket) {
+                ExposureBracketingStrategy.applyManualEvShift(b, ch, meteredIso!!, meteredExp!!, ev, isNight)
+            } else {
+                b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                ExposureBracketingStrategy.applyEvShift(b, ch, ev)
+            }
             b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             b.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
             b.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
@@ -968,7 +966,8 @@ class Camera2Manager(
     }
 
     private fun onJpegAvailable(image: Image) {
-        val req = captureQueue.peek()
+        // Kareler istek sırasıyla gelir: JPEG'ini henüz almamış ilk isteğe ait
+        val req = captureQueue.firstOrNull { it.jpegBytes == null }
         if (req == null) {
             image.close()
             return
@@ -982,11 +981,29 @@ class Camera2Manager(
             tryFinishCapture(req)
         } catch (e: Exception) {
             Log.e(TAG, "JPEG okuma hatası", e)
-            captureQueue.remove(req)
+            discardRequest(req)
             mainPost { req.onError() }
         } finally {
             image.close()
         }
+    }
+
+    /** RAW_SENSOR karesi: DNG yazılana kadar açık tutulur, sonra kapatılır. */
+    private fun onRawAvailable(image: Image) {
+        val req = captureQueue.firstOrNull { it.expectsRaw && it.rawImage == null }
+        if (req == null) {
+            image.close()
+            return
+        }
+        req.rawImage = image
+        tryFinishCapture(req)
+    }
+
+    /** İsteği kuyruktan çıkarır ve tuttuğu RAW karesini serbest bırakır. */
+    private fun discardRequest(req: PendingCaptureRequest) {
+        captureQueue.remove(req)
+        try { req.rawImage?.close() } catch (_: Throwable) {}
+        req.rawImage = null
     }
 
     private fun tryFinishCapture(req: PendingCaptureRequest) {
@@ -1001,6 +1018,7 @@ class Camera2Manager(
             val name = MediaStoreHelper.timestampName(prefix)
             val uri = MediaStoreHelper.createImageUri(context, "$name.jpg")
             if (uri == null) {
+                discardRequest(req)
                 mainPost { req.onError() }
                 return@post
             }
@@ -1044,36 +1062,8 @@ class Camera2Manager(
                 } catch (_: Exception) {}
                 MediaStoreHelper.finalizePending(context, uri)
 
-                // 16-Bit Linear DNG Kaydı
-                if (rawEnabled) {
-                    try {
-                        val dngName = MediaStoreHelper.timestampName("RAW")
-                        val dngUri = MediaStoreHelper.createDngUri(context, dngName)
-                        if (dngUri != null) {
-                            val decoded = android.graphics.BitmapFactory.decodeByteArray(outputBytes, 0, outputBytes.size)
-                            if (decoded != null) {
-                                val mat8 = com.a56camera.pipeline.YuvConverter.bitmapToMat(decoded)
-                                decoded.recycle()
-                                val mat16 = org.opencv.core.Mat()
-                                try {
-                                    mat8.convertTo(mat16, org.opencv.core.CvType.CV_16UC3, 257.0)
-                                    val expNs = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-                                    val isoVal = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                                    MediaStoreHelper.openOutput(context, dngUri)?.use { os ->
-                                        com.a56camera.pipeline.LinearDngWriter.writeDng(mat16, isoVal, expNs, os)
-                                    }
-                                    MediaStoreHelper.finalizePending(context, dngUri)
-                                    Log.i(TAG, "🌟 [Pro Mode 16-bit DNG] DNG kaydedildi: $dngUri")
-                                } finally {
-                                    mat8.release()
-                                    mat16.release()
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Pro DNG yazma hatası", e)
-                    }
-                }
+                // Gerçek RAW: sensörden gelen RAW_SENSOR karesi DngCreator ile DNG'ye yazılır
+                saveRawIfPresent(req, result)
 
                 val elapsed = System.currentTimeMillis() - req.createTime
                 Log.d("ImagePipeline", "Pipeline tamamlandı: ${elapsed}ms")
@@ -1090,8 +1080,28 @@ class Camera2Manager(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "JPEG kaydetme hatası", e)
+                discardRequest(req)
                 mainPost { req.onError() }
             }
+        }
+    }
+
+    private fun saveRawIfPresent(req: PendingCaptureRequest, result: TotalCaptureResult?) {
+        val raw = req.rawImage ?: return
+        try {
+            val ch = req.characteristics
+            if (ch != null && result != null) {
+                val dngUri = com.a56camera.utils.DngHelper.saveDng(
+                    context, ch, result, raw, req.location, req.orientation
+                )
+                if (dngUri != null) Log.i(TAG, "RAW DNG kaydedildi: $dngUri")
+                else Log.w(TAG, "RAW DNG kaydedilemedi")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "RAW DNG yazma hatası", e)
+        } finally {
+            try { raw.close() } catch (_: Throwable) {}
+            req.rawImage = null
         }
     }
 
@@ -1214,12 +1224,18 @@ class Camera2Manager(
         createPreviewSession()
     }
 
+    /**
+     * JPEG_ORIENTATION hesabı (Android CaptureRequest.JPEG_ORIENTATION dokümanındaki formül).
+     * [deviceRotation], OrientationEventListener'dan gelen saat yönündeki fiziksel açıdır (0/90/180/270).
+     * Arka kamera: (sensör + açı), ön kamera: (sensör − açı) — ön kamera ayna olduğu için yön terslenir.
+     */
     private fun jpegOrientation(ch: CameraCharacteristics, deviceRotation: Int): Int {
         val sensorOrientation = ch.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val rotation = ((deviceRotation % 360) + 360) % 360
         return if (currentFacing == Camera2Utils.Facing.FRONT) {
-            (360 - (sensorOrientation + deviceRotation) % 360) % 360
+            (sensorOrientation - rotation + 360) % 360
         } else {
-            (sensorOrientation - deviceRotation + 360) % 360
+            (sensorOrientation + rotation) % 360
         }
     }
 
@@ -1232,6 +1248,7 @@ class Camera2Manager(
             try { extensionSession?.close(); extensionSession = null } catch (_: Throwable) {}
         }
         yuvBurstFrameListener = null
+        captureQueue.toList().forEach { discardRequest(it) }
         sessionManager?.close()
         try { cameraDevice?.close() } catch (_: Throwable) {}
         cameraDevice = null

@@ -53,26 +53,18 @@ class ImageReaderManager(private val bgHandler: Handler) {
     }
 
     /**
-     * RAW_SENSOR reader'ı kurar (maxImages=16 burst çekimleri destekler).
+     * RAW_SENSOR reader'ı kurar. Tek kare RAW+JPEG için birkaç tampon yeterli; kareler DNG yazılınca kapatılır.
      */
     fun setupRaw(ch: CameraCharacteristics, onImage: (Image) -> Unit): Boolean {
         closeRaw()
         return try {
-            var rawFormat = ImageFormat.RAW_SENSOR
-            var size = Camera2Utils.largestOutputSize(ch, rawFormat)
-            if (size == null) {
-                rawFormat = ImageFormat.RAW10
-                size = Camera2Utils.largestOutputSize(ch, rawFormat)
-            }
-            if (size == null) {
-                rawFormat = ImageFormat.RAW12
-                size = Camera2Utils.largestOutputSize(ch, rawFormat)
-            }
-            
-            if (size == null) throw IllegalStateException("RAW çıktı boyutu bulunamadı")
+            // DngCreator yalnızca RAW_SENSOR kabul eder; RAW10/RAW12 DNG'ye yazılamaz
+            val rawFormat = ImageFormat.RAW_SENSOR
+            val size = Camera2Utils.largestOutputSize(ch, rawFormat)
+                ?: throw IllegalStateException("RAW_SENSOR çıktı boyutu bulunamadı")
 
             rawListener = onImage
-            rawReader = ImageReader.newInstance(size.width, size.height, rawFormat, 16).apply {
+            rawReader = ImageReader.newInstance(size.width, size.height, rawFormat, 4).apply {
                 setOnImageAvailableListener({ reader ->
                     reader.acquireNextImage()?.let { img ->
                         rawListener?.invoke(img) ?: img.close()

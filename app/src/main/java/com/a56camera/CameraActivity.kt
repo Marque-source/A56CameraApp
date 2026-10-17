@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.location.Location
-import android.media.Image
 import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
@@ -76,6 +75,43 @@ class CameraActivity : AppCompatActivity() {
 
     private var isExposureDragging = false
     private var lastDragTouchY = 0f
+
+    // ─── Konum etiketi (EXIF GPS) ───
+    private var lastKnownLocation: Location? = null
+    private var locationPermissionAsked = false
+    private var fusedLocation: com.google.android.gms.location.FusedLocationProviderClient? = null
+    private val locationCallback = object : com.google.android.gms.location.LocationCallback() {
+        override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
+            result.lastLocation?.let { lastKnownLocation = it }
+        }
+    }
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        if (result.values.any { it }) startLocationUpdates()
+        else Toast.makeText(this, "Konum izni verilmedi, fotoğraflara konum eklenmeyecek", Toast.LENGTH_SHORT).show()
+    }
+
+    // ─── Başka uygulamadan gelen "fotoğraf çek" isteği (ACTION_IMAGE_CAPTURE) ───
+    private var captureIntentOutput: Uri? = null
+    private var isCaptureIntent = false
+
+    // ─── Canlı histogram: önizleme karesinden ~7 fps ───
+    private val histogramHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val histogramTick = object : Runnable {
+        override fun run() {
+            if (binding.histogram.isVisible && binding.previewView.isAvailable) {
+                try {
+                    binding.previewView.getBitmap(160, 120)?.let { bmp ->
+                        val hist = HistogramCalculator.fromBitmap(bmp)
+                        bmp.recycle()
+                        binding.histogram.updateHistogram(hist.red, hist.green, hist.blue, hist.luma)
+                    }
+                } catch (_: Exception) {}
+            }
+            histogramHandler.postDelayed(this, 150L)
+        }
+    }
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -158,7 +194,6 @@ class CameraActivity : AppCompatActivity() {
                 }
             }
         }
-        camera.onYuvImage = if (histogramEnabled) { img -> computeHistogram(img) } else null
 
         if (binding.previewView.isAvailable) {
             camera.start()
@@ -179,6 +214,16 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        if (intent?.action == android.provider.MediaStore.ACTION_IMAGE_CAPTURE) {
+            isCaptureIntent = true
+            captureIntentOutput = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(android.provider.MediaStore.EXTRA_OUTPUT, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(android.provider.MediaStore.EXTRA_OUTPUT)
+            }
+            binding.modeContainer.select(CaptureMode.PHOTO)
+        }
         val modeStr = intent?.getStringExtra("mode")
         if (modeStr != null) {
             try {
@@ -532,11 +577,12 @@ class CameraActivity : AppCompatActivity() {
             binding.btnRaw.setTextColor(android.graphics.Color.WHITE)
         }
         if (::camera.isInitialized) camera.rawEnabled = isExpertRawEnabled
-        Toast.makeText(
-            this,
-            if (isExpertRawEnabled) "🌟 Expert RAW (16-bit DNG) Aktif" else "Expert RAW Kapalı (Yalnızca JPEG)",
-            Toast.LENGTH_SHORT
-        ).show()
+        val msg = when {
+            !isExpertRawEnabled -> "Expert RAW Kapalı (Yalnızca JPEG)"
+            ::camera.isInitialized && !camera.isRawSupported() -> "Bu kamera RAW desteklemiyor (yalnızca işlenmiş DNG)"
+            else -> "🌟 Expert RAW Aktif (JPEG + sensör DNG)"
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     private var is50MpEnabled = false
@@ -863,6 +909,7 @@ class CameraActivity : AppCompatActivity() {
             onSaved = { uri, info ->
                 runOnUiThread {
                     binding.statusChip.isVisible = false
+                    if (deliverCaptureResult(uri)) return@runOnUiThread
                     val msg = if (info.isNotEmpty()) "Pro Fotoğraf Kaydedildi\n$info" else "Pro Fotoğraf Kaydedildi"
                     Toast.makeText(this@CameraActivity, msg, Toast.LENGTH_SHORT).show()
                     updateGalleryThumb(uri)
@@ -894,6 +941,7 @@ class CameraActivity : AppCompatActivity() {
             onSaved = { uri ->
                 runOnUiThread {
                     binding.statusChip.isVisible = false
+                    if (deliverCaptureResult(uri)) return@runOnUiThread
                     Toast.makeText(this@CameraActivity, "Portre Fotoğrafı Kaydedildi", Toast.LENGTH_SHORT).show()
                     updateGalleryThumb(uri)
                 }
@@ -954,6 +1002,7 @@ class CameraActivity : AppCompatActivity() {
             onSaved = { uri ->
                 runOnUiThread {
                     stopNightCaptureUi()
+                    if (deliverCaptureResult(uri)) return@runOnUiThread
                     updateGalleryThumb(uri)
                     Toast.makeText(this@CameraActivity, "📸 Gece Fotoğrafı Hazır!", Toast.LENGTH_SHORT).show()
                 }
@@ -999,6 +1048,7 @@ class CameraActivity : AppCompatActivity() {
             onSaved = { uri ->
                 runOnUiThread {
                     binding.statusChip.isVisible = false
+                    if (deliverCaptureResult(uri)) return@runOnUiThread
                     Toast.makeText(this@CameraActivity, R.string.photo_saved, Toast.LENGTH_SHORT).show()
                     updateGalleryThumb(uri)
                 }
@@ -1232,27 +1282,84 @@ class CameraActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
-    private var lastHistTime = 0L
+    private fun prefs() = PreferenceManager.getDefaultSharedPreferences(this)
 
-    private fun computeHistogram(image: Image) {
-        val now = System.currentTimeMillis()
-        if (now - lastHistTime < 66L) {
-            image.close()
+    private fun locationTaggingEnabled(): Boolean =
+        prefs().getBoolean("pref_location_tagging", false)
+
+    /** Ayarlarda "Konum Etiketi" açıksa ve izin varsa en son bilinen konum; aksi halde null. */
+    private fun currentLocation(): Location? =
+        if (locationTaggingEnabled() && PermissionUtils.hasLocationPermission(this)) lastKnownLocation else null
+
+    @SuppressLint("MissingPermission")
+    private fun startLocationUpdates() {
+        if (!locationTaggingEnabled()) return
+        if (!PermissionUtils.hasLocationPermission(this)) {
+            // İzin penceresi kapanınca onResume tekrar çalışır; reddedilirse sürekli sormamak için bir kez iste
+            if (!locationPermissionAsked) {
+                locationPermissionAsked = true
+                locationPermissionLauncher.launch(PermissionUtils.locationPermissions)
+            }
             return
         }
-        lastHistTime = now
+        val client = fusedLocation
+            ?: com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this)
+                .also { fusedLocation = it }
+        client.lastLocation.addOnSuccessListener { loc -> if (loc != null) lastKnownLocation = loc }
+        val request = com.google.android.gms.location.LocationRequest.Builder(
+            com.google.android.gms.location.Priority.PRIORITY_BALANCED_POWER_ACCURACY, 10_000L
+        ).setMinUpdateIntervalMillis(5_000L).build()
         try {
-            val hist = HistogramCalculator.fromYuv(image, step = 8)
-            runOnUiThread { binding.histogram.updateHistogram(hist.red, hist.green, hist.blue, hist.luma) }
-        } catch (e: Exception) {
-        } finally {
-            image.close()
+            client.requestLocationUpdates(request, locationCallback, android.os.Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            android.util.Log.w("CameraActivity", "Konum güncellemesi başlatılamadı", e)
         }
     }
 
-    private fun prefs() = PreferenceManager.getDefaultSharedPreferences(this)
+    private fun stopLocationUpdates() {
+        fusedLocation?.removeLocationUpdates(locationCallback)
+    }
 
-    private fun currentLocation(): Location? = null
+    /**
+     * ACTION_IMAGE_CAPTURE ile açıldıysak çekilen fotoğrafı çağıran uygulamaya teslim et.
+     * EXTRA_OUTPUT verilmişse dosyayı oraya kopyalar, verilmemişse küçük bir önizleme döndürür.
+     * @return istek teslim edildiyse true (aktivite kapanır)
+     */
+    private fun deliverCaptureResult(savedUri: Uri): Boolean {
+        if (!isCaptureIntent) return false
+        lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val output = captureIntentOutput
+                    if (output != null) {
+                        contentResolver.openInputStream(savedUri)?.use { input ->
+                            contentResolver.openOutputStream(output, "w")?.use { out -> input.copyTo(out) }
+                        } != null
+                    } else true
+                } catch (e: Exception) {
+                    android.util.Log.e("CameraActivity", "Çekim sonucu çağıran uygulamaya yazılamadı", e)
+                    false
+                }
+            }
+            if (!ok) {
+                setResult(RESULT_CANCELED)
+            } else if (captureIntentOutput != null) {
+                setResult(RESULT_OK)
+            } else {
+                val thumb = withContext(Dispatchers.IO) {
+                    try {
+                        contentResolver.openInputStream(savedUri)?.use { input ->
+                            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+                            android.graphics.BitmapFactory.decodeStream(input, null, opts)
+                        }
+                    } catch (_: Exception) { null }
+                }
+                setResult(RESULT_OK, Intent("inline-data").putExtra("data", thumb))
+            }
+            finish()
+        }
+        return true
+    }
 
     private fun videoQuality(): VideoCapture.Quality = when {
         selectedVideoRes == "uhd" && selectedVideoFps == 60 -> VideoCapture.Quality.UHD_60
@@ -1264,6 +1371,11 @@ class CameraActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         enableFullscreen()
+        histogramEnabled = prefs().getBoolean("pref_histogram", false)
+        binding.histogram.isVisible = currentMode == CaptureMode.PRO || histogramEnabled
+        histogramHandler.removeCallbacks(histogramTick)
+        histogramHandler.post(histogramTick)
+        startLocationUpdates()
         if (::camera.isInitialized) {
             if (binding.previewView.isAvailable) {
                 camera.start()
@@ -1275,6 +1387,8 @@ class CameraActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        histogramHandler.removeCallbacks(histogramTick)
+        stopLocationUpdates()
         if (isRecording) {
             when (currentMode) {
                 CaptureMode.VIDEO -> videoCapture.cancel()
