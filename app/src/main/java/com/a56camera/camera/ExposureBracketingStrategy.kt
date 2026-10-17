@@ -31,12 +31,12 @@ object ExposureBracketingStrategy {
         return BracketSettings(iso, exp, getEvShifts(isNight))
     }
 
-    // Google Pixel Kasıtlı Alt-Pozlama (Highlight Protection) + Foton Biriktirme:
-    // -1.0 EV: Sokak lambaları, pencereler ve neonların patlamasını %100 önler.
-    // -0.4 EV: Geçiş aydınlatması ve orta ton detayları.
-    // 0.0 EV x 3: Gölgeler ve binalar için foton istifleme (temiz düşük gürültü).
+    // Gece: 5 kare AYNI pozlamayla çekilir ve ortalanır. Gece birleştirmesi (TemporalMerge)
+    // kareleri doğrudan ortaladığı için pozlama farkı olan kareler (-1 / -0.4 EV) gürültüyü
+    // azaltmak yerine görüntüyü karartıyor ve en karanlık kare referans seçiliyordu.
+    // Gündüz: -0.5 EV kare Mertens füzyonunda parlak alanları kurtarmak için kullanılır.
     fun getEvShifts(isNight: Boolean): List<Float> =
-        if (isNight) listOf(-1.0f, -0.4f, 0.0f, 0.0f, 0.0f)
+        if (isNight) listOf(0.0f, 0.0f, 0.0f, 0.0f, 0.0f)
         else listOf(-0.5f, 0.0f, 0.0f)
 
     fun frameCount(isNight: Boolean) = getEvShifts(isNight).size

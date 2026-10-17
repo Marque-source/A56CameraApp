@@ -138,11 +138,8 @@ class ImageProcessingPipeline(private val context: Context) {
         }
         val tAcutance = System.currentTimeMillis() - tAcu0
 
-        // ──── Adım 4.5: Google Pixel Tarzı Akıllı Pütür (Heuristic Smart Grain) ────
-        // Saf OpenCV analizi: Gökyüzü %0 gren (kadife, pürüzsüz); Binalar/Zemin %100 analog doku
-        if (config.colorProfile == ToneMapHelper.ColorProfile.NIGHT || iso >= 800) {
-            SemanticMaskGenerator.applySmartGrain(finalMat, iso)
-        }
+        // Not: Eskiden burada "Smart Grain" ile bilerek rastgele gren ekleniyordu (gece modunda her zaman,
+        // diğer modlarda ISO 800+). Kumlanma şikayetinin doğrudan nedeni olduğu için kaldırıldı.
 
         // Yalnızca TEK SEFERDE son Bitmap'e çevir! (Sıfır sis, sıfır ara kayıp, saf ham optik netlik)
         val tM2B0 = System.currentTimeMillis()

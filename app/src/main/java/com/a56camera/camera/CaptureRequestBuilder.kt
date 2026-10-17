@@ -85,7 +85,8 @@ class CaptureRequestBuilder(
         zoom.applyTo(builder)
 
         applyFlash(builder, flashMode)
-        applyProcessing(builder, forVideo, ch, forYuvBurst)
+        applyProcessing(builder, forVideo, ch, forYuvBurst,
+            stillJpeg = template == CameraDevice.TEMPLATE_STILL_CAPTURE && !forYuvBurst)
 
         if (template == CameraDevice.TEMPLATE_STILL_CAPTURE || template == CameraDevice.TEMPLATE_VIDEO_SNAPSHOT) {
             safeSet(builder, CaptureRequest.JPEG_QUALITY, processing.jpegQuality)
@@ -176,7 +177,8 @@ class CaptureRequestBuilder(
         builder: CaptureRequest.Builder,
         forVideo: Boolean,
         ch: CameraCharacteristics,
-        forYuvBurst: Boolean
+        forYuvBurst: Boolean,
+        stillJpeg: Boolean = false
     ) {
         val nr = ch.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)
         val edge = ch.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES)
@@ -213,7 +215,16 @@ class CaptureRequestBuilder(
             safeSet(builder, CaptureRequest.CONTROL_AWB_LOCK, true)
             safeSet(builder, CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
         } else {
-            safeSet(builder, CaptureRequest.NOISE_REDUCTION_MODE, bestNr)
+            // Tek kare fotoğraf (ISP JPEG): uygulama bu JPEG'de parlaklık gürültüsünü ayrıca temizlemiyor,
+            // bu yüzden ISP'nin yüksek kaliteli gürültü azaltması kullanılır. MINIMAL/OFF burada doğrudan kumlanma demekti.
+            val stillNr = when {
+                stillJpeg && nr?.contains(CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY) == true ->
+                    CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+                stillJpeg && nr?.contains(CaptureRequest.NOISE_REDUCTION_MODE_FAST) == true ->
+                    CaptureRequest.NOISE_REDUCTION_MODE_FAST
+                else -> bestNr
+            }
+            safeSet(builder, CaptureRequest.NOISE_REDUCTION_MODE, stillNr)
             safeSet(builder, CaptureRequest.EDGE_MODE, bestEdge)
             setIfSupported(builder, CaptureRequest.HOT_PIXEL_MODE, processing.hotPixelMode, hot)
             setIfSupported(builder, CaptureRequest.TONEMAP_MODE, processing.tonemapPreset, tone)
