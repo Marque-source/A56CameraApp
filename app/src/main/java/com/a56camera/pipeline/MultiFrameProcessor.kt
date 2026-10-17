@@ -196,18 +196,8 @@ class MultiFrameProcessor {
 
         // Aynı pozlamalı kareler: hareket korumalı eşit ağırlıklı ortalama (gürültü √N kat azalır)
         val tMerge0 = System.currentTimeMillis()
-        val normalizedResult = TemporalMerge.weightedAverage(validAligned, motionThreshold = 0.20)
-
-        // 16-Bit Linear RAW Matrisi (Lightroom & Expert RAW için)
-        val raw16u = if (produceRaw16u) {
-            val r16 = Mat()
-            normalizedResult.convertTo(r16, CvType.CV_16UC3, 65535.0)
-            r16
-        } else null
-
-        val result = Mat()
-        normalizedResult.convertTo(result, CvType.CV_8UC3, 255.0)
-        normalizedResult.release()
+        // 16-bit çıktı Expert RAW (doğrusal DNG) için
+        val (result, raw16u) = TemporalMerge.weightedAverage(validAligned, motionThreshold = 0.20, produce16u = produceRaw16u)
         validAligned.forEach { it.release() }
 
         Log.i(TAG, "⏱️ [MultiFrame] TOPLAM: ${System.currentTimeMillis() - tTotal0}ms | YUV→BGR: ${tYuv}ms | " +
