@@ -17,8 +17,8 @@
 
 ```
 app/src/main/
-├── java/com/a56camera/
-│   ├── A56Application.kt              # Uygulama sınıfı (paket adı tarihsel olarak com.a56camera)
+├── java/io/github/marquesource/pixora/
+│   ├── PixoraApplication.kt           # Uygulama sınıfı
 │   ├── CameraActivity.kt             # Ana kamera ekranı (launcher)
 │   ├── SettingsActivity.kt           # Ayarlar
 │   ├── camera/                       # Saf Camera2 katmanı

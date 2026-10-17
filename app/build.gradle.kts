@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.a56camera"
+    namespace = "io.github.marquesource.pixora"
     compileSdk = 35
 
     defaultConfig {

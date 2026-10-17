@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "A56Camera"
+rootProject.name = "Pixora"
 include(":app")

@@ -1,5 +1,5 @@
-# A56 Kamera ProGuard kuralları
--keep class com.a56camera.** { *; }
+# Pixora ProGuard kuralları
+-keep class io.github.marquesource.pixora.** { *; }
 -keep class android.hardware.camera2.** { *; }
 
 # LiteRT / TFLite / GPU delegate
