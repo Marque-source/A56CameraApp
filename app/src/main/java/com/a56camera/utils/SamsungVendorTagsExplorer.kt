@@ -111,6 +111,8 @@ object SamsungVendorTagsExplorer {
     }
 
     private fun <T> probeCharKey(characteristics: CameraCharacteristics, keyName: String, clazz: Class<T>) {
+        // CameraCharacteristics.Key(String, Class) yapıcısı Android 10 (API 29) ile geldi
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return
         try {
             val key = CameraCharacteristics.Key(keyName, clazz)
             val value = characteristics.get(key)

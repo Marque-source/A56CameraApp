@@ -30,6 +30,8 @@ class TimeLapseCapture(private val context: Context) {
     private var recorder: MediaRecorder? = null
     private var recorderSurface: Surface? = null
     private var outputUri: Uri? = null
+    /** Kayıt dosyasının tanıtıcısı; kayıt bitince kapatılır (eskiden açık kalıyordu). */
+    private var outputPfd: android.os.ParcelFileDescriptor? = null
     var isRecording = false
         private set
 
@@ -49,6 +51,8 @@ class TimeLapseCapture(private val context: Context) {
         val uri = MediaStoreHelper.createVideoUri(context, "$name.mp4") ?: return null
         outputUri = uri
         val pfd = context.contentResolver.openFileDescriptor(uri, "rw") ?: return null
+        outputPfd?.close()
+        outputPfd = pfd
 
         recorder = createRecorder().apply {
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
@@ -85,9 +89,14 @@ class TimeLapseCapture(private val context: Context) {
             isRecording = false
             recorderSurface?.release(); recorderSurface = null
             recorder = null
+            closePfd()
             outputUri?.also { MediaStoreHelper.finalizePending(context, it) }
         } catch (e: Exception) {
+            // Hiç kare kaydedilmeden durdurulursa MediaRecorder.stop() hata verir (ör. 30 sn aralıkla 5 sn çekim)
             Log.e(TAG, "stop hatası", e)
+            try { recorder?.release() } catch (_: Exception) {}
+            recorder = null; isRecording = false
+            closePfd()
             outputUri?.let { context.contentResolver.delete(it, null, null) }
             null
         }
@@ -98,8 +107,14 @@ class TimeLapseCapture(private val context: Context) {
         recorder = null
         recorderSurface?.release(); recorderSurface = null
         isRecording = false
+        closePfd()
         outputUri?.let { context.contentResolver.delete(it, null, null) }
         outputUri = null
+    }
+
+    private fun closePfd() {
+        try { outputPfd?.close() } catch (_: Exception) {}
+        outputPfd = null
     }
 
     companion object { private const val TAG = "TimeLapseCapture" }

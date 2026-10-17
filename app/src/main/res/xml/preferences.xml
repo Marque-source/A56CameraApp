@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <!-- GENEL AYARLAR -->
     <PreferenceCategory
@@ -26,6 +27,15 @@
             android:defaultValue="false"
             android:layout="@layout/preference_item_frutiger" />
 
+        <ListPreference
+            android:key="pref_grid"
+            android:title="Izgara Çizgileri"
+            android:entries="@array/grid_entries"
+            android:entryValues="@array/grid_values"
+            android:defaultValue="off"
+            app:useSimpleSummaryProvider="true"
+            android:layout="@layout/preference_item_frutiger" />
+
         <SwitchPreferenceCompat
             android:key="pref_histogram"
             android:title="Canlı Histogram"
@@ -35,23 +45,29 @@
     </PreferenceCategory>
 
     <!-- VİDEO AYARLARI -->
+    <!-- Çözünürlük, kare hızı ve sabitleme video modundaki hızlı ayarlar panelinden seçilir.
+         (Eskiden burada hiçbir şeyi değiştirmeyen "Video Çözünürlüğü" ve "Video Sabitleme" vardı;
+         kodun okuduğu codec ve time-lapse aralığı ise hiç gösterilmiyordu.) -->
     <PreferenceCategory
         android:title="Video"
         android:layout="@layout/preference_category_frutiger">
 
         <ListPreference
-            android:key="pref_video_quality"
-            android:title="Video Çözünürlüğü"
-            android:entries="@array/video_quality_entries"
-            android:entryValues="@array/video_quality_values"
-            android:defaultValue="fhd"
+            android:key="pref_video_codec"
+            android:title="Video Kodlayıcı"
+            android:entries="@array/video_codec_entries"
+            android:entryValues="@array/video_codec_values"
+            android:defaultValue="h264"
+            app:useSimpleSummaryProvider="true"
             android:layout="@layout/preference_item_frutiger" />
 
-        <SwitchPreferenceCompat
-            android:key="pref_video_stabilization"
-            android:title="Video Sabitleme (OIS + EIS)"
-            android:summary="Sarsıntısız akıcı video kaydı"
-            android:defaultValue="true"
+        <ListPreference
+            android:key="pref_timelapse_interval"
+            android:title="Hızlandırılmış Çekim Aralığı"
+            android:entries="@array/timelapse_interval_entries"
+            android:entryValues="@array/timelapse_interval_values"
+            android:defaultValue="1"
+            app:useSimpleSummaryProvider="true"
             android:layout="@layout/preference_item_frutiger" />
     </PreferenceCategory>
 

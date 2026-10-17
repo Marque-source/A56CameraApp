@@ -26,7 +26,6 @@ class ImageProcessingPipeline(private val context: Context) {
     private val denoiser = SmartDenoiser()
     val tfliteEngine by lazy { TFLitePipelineEngine(context) }
     val portraitEngine get() = tfliteEngine.portraitEngine
-    val superResEngine get() = tfliteEngine.superResEngine
     val zeroDceEngine get() = tfliteEngine.zeroDceEngine
 
     data class ProcessingResult(
@@ -45,7 +44,6 @@ class ImageProcessingPipeline(private val context: Context) {
         val sharpenEnabled: Boolean = true,
         val hdrEnabled: Boolean = true,
         val portraitBokehEnabled: Boolean = false,
-        val superResolutionEnabled: Boolean = false,
         val lowLightEnhanceEnabled: Boolean = false,
         val expertRawEnabled: Boolean = false,
         val jpegQuality: Int = 98,
@@ -194,19 +192,8 @@ class ImageProcessingPipeline(private val context: Context) {
             Log.i(TAG, "🤖 [Zero-DCE] Atlandı (lowLightEnhanceEnabled=false)")
         }
 
-        // ──── Adım 6: Real-ESRGAN x4 AI Süper Çözünürlük (PINTO Model Zoo / GPU) ────
-        if (config.superResolutionEnabled) {
-            onProgress?.invoke("AI Süper Çözünürlük (Real-ESRGAN)...")
-            try {
-                val srBmp = superResEngine.enhanceResolution(currentBitmap)
-                if (srBmp !== currentBitmap) {
-                    currentBitmap.recycle()
-                    currentBitmap = srBmp
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Süper çözünürlük hatası", e)
-            }
-        }
+        // Not: Eskiden 2x ve üzeri zoomda burada "Real-ESRGAN x4 süper çözünürlük" çalışıyordu. Model 128x128
+        // girdi aldığı için BÜTÜN fotoğrafı 128x128'e küçültüp 512x512 olarak kaydediyordu. Kaldırıldı.
 
         var savedRawUri: Uri? = null
         try {

@@ -12,68 +12,14 @@
         <item>square</item>
         <item>golden</item>
     </string-array>
-    <string-array name="video_quality_entries">
-        <item>4K (UHD) 30fps</item>
-        <item>1080p (FHD) 60fps</item>
-        <item>1080p (FHD) 30fps</item>
-        <item>720p (HD) 120fps</item>
-    </string-array>
-    <string-array name="video_quality_values">
-        <item>uhd</item>
-        <item>fhd60</item>
-        <item>fhd</item>
-        <item>hd120</item>
-    </string-array>
 
     <!-- JPEG kalitesi -->
-    <string-array name="photo_quality_entries">
-        <item>75</item>
-        <item>85</item>
-        <item>95</item>
-        <item>100</item>
-    </string-array>
-    <string-array name="photo_quality_values">
-        <item>75</item>
-        <item>85</item>
-        <item>95</item>
-        <item>100</item>
-    </string-array>
 
     <!-- HDR modu -->
-    <string-array name="hdr_mode_entries">
-        <item>Kapalı</item>
-        <item>Otomatik</item>
-        <item>Her Zaman</item>
-    </string-array>
-    <string-array name="hdr_mode_values">
-        <item>off</item>
-        <item>auto</item>
-        <item>on</item>
-    </string-array>
 
     <!-- AI / NPU işleme seviyesi -->
-    <string-array name="ai_processing_entries">
-        <item>Kapalı</item>
-        <item>Hafif</item>
-        <item>Tam</item>
-    </string-array>
-    <string-array name="ai_processing_values">
-        <item>off</item>
-        <item>light</item>
-        <item>full</item>
-    </string-array>
 
     <!-- Gürültü azaltma -->
-    <string-array name="noise_reduction_entries">
-        <item>Kapalı</item>
-        <item>Düşük</item>
-        <item>Yüksek</item>
-    </string-array>
-    <string-array name="noise_reduction_values">
-        <item>off</item>
-        <item>low</item>
-        <item>high</item>
-    </string-array>
 
     <!-- Video kodeği -->
     <string-array name="video_codec_entries">

@@ -2,44 +2,44 @@
 
 Samsung Galaxy A56 için **Google Pixel Camera tarzı**, tam özellikli **Native Android** kamera uygulaması.
 Kotlin + **Camera2 API** + Material Design 3 + Hilt ile geliştirilmiştir. Önizleme, çekim, video ve
-gelişmiş modlar doğrudan Camera2 (`android.hardware.camera2`) üzerine kuruludur. Projede CameraX
-bağımlılıkları ve deneysel `CameraXSession` / `CameraXExtensionsProbe` sınıfları bulunur ama uygulamanın
-çalışan akışı bunları kullanmaz. Manuel sensör kontrolü, RAW ve yüksek hızlı çekim cihazın Camera2
-yeteneklerine bağlıdır.
+gelişmiş modlar doğrudan Camera2 (`android.hardware.camera2`) üzerine kuruludur. Manuel sensör kontrolü
+ve RAW, cihazın Camera2 yeteneklerine bağlıdır.
 
 ---
 
 ## ✨ Özellikler
 
 ### Kamera Modülleri
-- **50MP Ana** (1x), **12MP Ultra Geniş** (0.6x), **2x** dijital, **12MP Ön** kamera
+- **50MP Ana** (1x), **Ultra Geniş** (0.6x — telefon üçüncü taraf uygulamalara açıyorsa), **2x** dijital, **Ön** kamera
 - Modüller arası geçiş + zoom butonları (0.6x / 1x / 2x)
-- Pinch-to-zoom + dokunarak odaklama
+- Pinch-to-zoom + dokunarak odak/pozlama (5 sn tutulur; uzun basınca kilitlenir)
 
 ### Çekim Modları
 | Mod | Açıklama |
 |-----|----------|
-| **Fotoğraf** | JPEG çekim, HDR, flaş, zamanlayıcı |
-| **Video** | 4K@30, 1080p@60/30, 720p@120 |
-| **Pro/Manuel** | ISO, perde, odak, WB, EV, histogram |
-| **Gece** | Camera2 çok kareli uzun pozlama (manuel ISO/perde + HIGH_QUALITY NR) |
-| **Portre** | Camera2 yüz tespiti (FACE_DETECT) + yazılım bokeh |
-| **Panorama** | Jiroskop rehberli ardışık çekim + yatay birleştirme |
-| **Ağır Çekim** | Constrained high-speed oturum (720p@240 / 1080p@120, donanıma göre) |
-| **Hızlandırılmış** | Time-lapse (0.5s–30s aralık, MediaRecorder capture-rate) |
-| **RAW (DNG)** | Fotoğraf/Pro modunda Camera2 RAW_SENSOR + DngCreator ile JPEG + sensör DNG; Gece/Portre/HDR'da işlenmiş 16-bit doğrusal DNG |
+| **Fotoğraf** | ISP JPEG + renk profili, flaş, zamanlayıcı, sahne algılama |
+| **Video** | 4K@30/60, 1080p@30/60 (kamera desteklemiyorsa otomatik düşürülür), H.264/H.265, EIS (destekleniyorsa) |
+| **Pro/Manuel** | ISO ve perde ayrı ayrı ya da birlikte, odak, beyaz dengesi, EV, renk profili, histogram |
+| **Gece** | 5 kare aynı pozlama → hareket korumalı ortalama → gürültü azaltma → gece ton eşleme |
+| **Portre** | 3 kare (gündüz Mertens füzyonu) + MiDaS derinlik haritasıyla arka plan bulanıklığı |
+| **Panorama** | Jiroskop rehberli: önizlemeden kare toplanır, silindirik izdüşüm + faz korelasyonu ile birleştirilir |
+| **Hızlandırılmış** | Time-lapse (0,5–30 sn aralık; Ayarlar'dan seçilir) |
+| **RAW (DNG)** | Fotoğraf/Pro modunda Camera2 RAW_SENSOR + DngCreator ile JPEG + sensör DNG; Gece/Portre'de işlenmiş 16-bit doğrusal DNG |
+
+> Ağır çekim (yüksek hızlı video) modu henüz yok.
 
 ### Pro Mod Kontrolleri
 - **ISO**: Auto, 50–3200 (logaritmik)
 - **Perde Hızı**: Auto, 1/4000s – 30s
 - **Odak**: AF / Manuel (sonsuz → makro)
-- **Beyaz Dengesi**: Auto, 2300K – 7500K
+- **Beyaz Dengesi**: Auto, 2300K – 7500K (telefonun kalibre ettiği en yakın ön ayara eşlenir)
 - **EV**: Cihaz aralığına göre pozlama telafisi
 - **Canlı Histogram** (RGB/Luma)
 
 ### Ek Özellikler
-- Grid çizgileri (3x3 / kare / altın oran)
-- AF/AE kilidi (uzun basma)
+- Izgara çizgileri (3x3 / kare / altın oran) — Ayarlar → Izgara Çizgileri
+- AF/AE kilidi (önizlemede uzun basma)
+- Deklanşör sesi (Ayarlar'dan kapatılabilir)
 - GPS EXIF konum etiketleme (Ayarlar → Konum Etiketi)
 - Ses tuşu ile çekim
 - MediaStore'a kayıt (DCIM/Camera)
@@ -51,9 +51,10 @@ yeteneklerine bağlıdır.
 ## 🛠️ Teknoloji
 
 - **Dil:** Kotlin
-- **Min SDK:** 28 (Android 9) · **Target/Compile SDK:** 34
+- **Min SDK:** 28 (Android 9) · **Target/Compile SDK:** 35
 - **Kamera:** **Camera2 API** (`android.hardware.camera2`)
-- **Görüntü işleme:** OpenCV, TensorFlow Lite (sahne, Zero-DCE, MiDaS, Real-ESRGAN), ARM64 NEON (C++)
+- **Görüntü işleme:** OpenCV 4.13, LiteRT/TensorFlow Lite (sahne sınıflandırma, Zero-DCE, MiDaS)
+- Yerel kütüphaneler Android 15'in 16 KB bellek sayfalarına hizalıdır
 - **DI:** Hilt (Dagger)
 - **UI:** Material Design 3, ViewBinding, önizleme için `TextureView`
 - **Görsel yükleme:** Glide
@@ -78,15 +79,20 @@ app/src/main/
 │   │   ├── FocusController.kt        # AF / dokunarak odak / manuel odak
 │   │   ├── WhiteBalanceController.kt # AWB / preset / manuel Kelvin
 │   │   ├── ZoomController.kt         # CONTROL_ZOOM_RATIO / CROP_REGION
-│   │   ├── NightModeCapture.kt       # Çok kareli uzun pozlama
+│   │   ├── ExposureBracketingStrategy.kt # Gece/portre burst pozlaması
 │   │   ├── TimeLapseCapture.kt       # Hızlandırılmış kayıt
 │   │   ├── VideoCapture.kt           # MediaRecorder video (H.264/H.265)
-│   │   ├── PortraitMode.kt           # Yüz tespiti + yazılım bokeh
-│   │   └── PanoramaCapture.kt        # Jiroskop rehberli birleştirme
+│   │   └── PanoramaCapture.kt        # Jiroskop rehberli çekim + silindirik birleştirme
+│   ├── pipeline/                     # Görüntü işleme
+│   │   ├── ImageProcessingPipeline.kt # Gece/portre: birleştirme → gürültü azaltma → ton → keskinlik → kayıt
+│   │   ├── MultiFrameProcessor.kt    # Hizalama (ORB) + Mertens / eşit ortalama
+│   │   ├── TemporalMerge.kt          # Hareket korumalı kare ortalaması
+│   │   ├── SmartDenoiser.kt          # Gürültüye uyarlanan NLM
+│   │   ├── ToneMapHelper.kt          # Renk profilleri, gece tonu, keskinleştirme
+│   │   └── *Engine.kt / SceneOptimizer.kt # LiteRT modelleri
 │   ├── ui/views/
-│   │   ├── Camera2PreviewView.kt     # TextureView önizleme (CameraX PreviewView yerine)
+│   │   ├── Camera2PreviewView.kt     # TextureView önizleme
 │   │   ├── ModeSelector.kt           # Yatay mod seçici
-│   │   ├── ZoomSeekBar.kt            # Kaydırmalı zoom
 │   │   ├── HistogramView.kt          # Canlı histogram
 │   │   ├── FocusRingView.kt          # Odak halkası animasyonu
 │   │   └── GridOverlayView.kt        # Izgara katmanı
@@ -125,20 +131,36 @@ cd A56CameraApp
 ./gradlew installDebug
 ```
 
-> **Gereksinimler:** JDK 17 veya üzeri (Android Studio'nun kendi JDK'sı yeterli), Android SDK 34,
-> NDK ve CMake 3.22.1 (C++ NEON çekirdeği için; Android Studio ilk derlemede kurmayı önerir).
-> SDK yolu `local.properties` içindeki `sdk.dir` ile verilir; bu dosya kişiye özel olduğu için depoya eklenmez.
+> **Gereksinimler:** JDK 17 veya üzeri (Android Studio'nun kendi JDK'sı yeterli) ve Android SDK 35.
+> NDK/CMake gerekmez. SDK yolu `local.properties` içindeki `sdk.dir` ile verilir; bu dosya kişiye özel
+> olduğu için depoya eklenmez.
+
+### Testler
+```bash
+./gradlew testDebugUnitTest   # Robolectric birim testleri (odak eşleme, pozlama, beyaz dengesi, izinler, EXIF)
+```
+
+### Yayın (imzalı) sürümü
+Proje köküne `keystore.properties` koyun (git'e eklenmez):
+```
+storeFile=/tam/yol/anahtar.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
+```
+Sonra `./gradlew assembleRelease`. Dosya yoksa yayın APK'sı imzasız üretilir ve telefona kurulamaz.
 
 ---
 
 ## 🔐 İzinler
 
-Uygulama ilk açılışta şu izinleri ister:
-`CAMERA`, `RECORD_AUDIO`, `READ_MEDIA_IMAGES/VIDEO` (zorunlu) ve
-`ACCESS_FINE_LOCATION` (GPS EXIF için; yalnızca Ayarlar → Konum Etiketi açıldığında istenir).
+- `CAMERA` — tek zorunlu izin (Android 9'da ayrıca dosya yazma).
+- `RECORD_AUDIO` — ilk video kaydında istenir; reddedilirse video sessiz kaydedilir.
+- `ACCESS_FINE_LOCATION` — yalnızca Ayarlar → Konum Etiketi açılınca istenir.
+- Galeri okuma izni istenmez: uygulama yalnızca kendi kaydettiği dosyaları görür.
 
 Başka uygulamalar "fotoğraf çek" (`ACTION_IMAGE_CAPTURE`) isteğiyle bu uygulamayı açabilir; çekilen
-fotoğraf istenen `EXTRA_OUTPUT` konumuna yazılıp çağıran uygulamaya döndürülür.
+fotoğraf istenen `EXTRA_OUTPUT` konumuna yazılıp çağıran uygulamaya döndürülür ve galeride bırakılmaz.
 
 ---
 
@@ -148,6 +170,9 @@ fotoğraf istenen `EXTRA_OUTPUT` konumuna yazılıp çağıran uygulamaya dönd�
   birlikte açılamazsa uygulama RAW'ı kapatıp uyarı verir ve normal çekime devam eder.
 - **Gece/Portre braketi**, cihaz `MANUAL_SENSOR` destekliyorsa ISO ve perde süresi doğrudan
   ayarlanarak çekilir; desteklemiyorsa AE telafisine düşer.
-- **Ultra geniş (0.6x)** modülü, cihazın fiziksel ultra geniş lensinden seçilir; yoksa ana kamera
-  kullanılır.
-- **Test ve Doğrulama Durumu:** Proje, fiziksel **Samsung Galaxy A56 5G (SM-A566B, Android 15 / One UI 7, Exynos 1580)** üzerinde derlenmiş, kurulmuş ve tüm modları (Pixel Real Tone, 4K/1080p 60fps video, gece sahnesi, hızlı ayar paneli) test edilip doğrulanmıştır.
+- **Ultra geniş (0.6x)** modülü, cihazın fiziksel ultra geniş lensinden ya da 1x altı zoom oranından seçilir;
+  telefon ikisini de uygulamalara açmıyorsa uyarı gösterilir.
+- **50MP** seçeneği Camera2'nin "yüksek çözünürlük" çıktı boyutlarını kullanır; gerçek çözünürlük telefona göre
+  değişebilir.
+- **Test durumu:** Birim testleri ve görüntü işleme hattının masaüstü ölçümleri dışında, son değişiklikler
+  telefonda henüz doğrulanmadı.

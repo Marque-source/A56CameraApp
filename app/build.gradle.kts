@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,12 +9,12 @@ plugins {
 
 android {
     namespace = "com.a56camera"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.a56camera"
         minSdk = 28
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -21,21 +23,24 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
-        externalNativeBuild {
-            cmake {
-                cppFlags += listOf("-std=c++17", "-O3", "-fvectorize", "-ffast-math")
-            }
-        }
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
+    // Yayın imzası: proje köküne (git'e girmeyen) keystore.properties koyulursa kullanılır.
+    // storeFile=/yol/anahtar.jks, storePassword=..., keyAlias=..., keyPassword=...
+    val keystorePropsFile = rootProject.file("keystore.properties")
+    val releaseSigning = if (keystorePropsFile.exists()) {
+        val props = Properties().apply { keystorePropsFile.inputStream().use { load(it) } }
+        signingConfigs.create("release") {
+            storeFile = file(props.getProperty("storeFile"))
+            storePassword = props.getProperty("storePassword")
+            keyAlias = props.getProperty("keyAlias")
+            keyPassword = props.getProperty("keyPassword")
         }
-    }
+    } else null
 
     buildTypes {
         release {
+            if (releaseSigning != null) signingConfig = releaseSigning
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -57,11 +62,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
-        compose = true
         buildConfig = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
     }
 
     packaging {
@@ -70,15 +71,13 @@ android {
         }
         jniLibs {
             useLegacyPackaging = false
-            pickFirsts += listOf(
-                "**/libOpenCL.so",
-                "**/libvulkan.so",
-                "**/libc++_shared.so",
-                "**/libtensorflowlite_jni.so",
-                "**/libtensorflowlite_gpu_jni.so"
-            )
+            // Sistem kütüphaneleri (libOpenCL/libvulkan) APK'ya alınmaz; telefonda zaten var
+            excludes += listOf("**/libOpenCL.so", "**/libvulkan.so")
+            pickFirsts += listOf("**/libc++_shared.so")
         }
     }
+
+    testOptions { unitTests.isIncludeAndroidResources = true }
 
     androidResources {
         noCompress += listOf("tflite")
@@ -86,45 +85,17 @@ android {
 }
 
 dependencies {
-    // Samsung Camera SDK — libs/ klasöründeki .aar ve .jar dosyaları
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
-
     // AndroidX
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-ktx:1.9.2")
-    implementation("androidx.activity:activity-compose:1.9.2")
-    implementation("androidx.fragment:fragment-ktx:1.8.3")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("com.google.android.material:material:1.12.0")
-
-    // Jetpack Compose
-    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.5")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.5")
-
-    // CameraX & Vendor Extensions
-    val cameraxVersion = "1.4.1"
-    implementation("androidx.camera:camera-core:$cameraxVersion")
-    implementation("androidx.camera:camera-camera2:$cameraxVersion")
-    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
-    implementation("androidx.camera:camera-view:$cameraxVersion")
-    implementation("androidx.camera:camera-extensions:$cameraxVersion")
-
-    // Futures & Guava Coroutines
-    implementation("androidx.concurrent:concurrent-futures-ktx:1.2.0")
-    implementation("com.google.guava:guava:33.2.1-android")
 
     // Lifecycle & Coroutines
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.8.1")
 
     // Preferences & Exif
     implementation("androidx.preference:preference-ktx:1.2.1")
@@ -141,21 +112,20 @@ dependencies {
     // Location
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
-    // TensorFlow Lite Full Suite (NNAPI NPU & AMD GPU Acceleration, Support, Metadata, Select-TF-Ops)
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-api:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
-    implementation("org.tensorflow:tensorflow-lite-metadata:0.4.4")
-    implementation("org.tensorflow:tensorflow-lite-select-tf-ops:2.16.1")
+    // LiteRT (TensorFlow Lite'ın yeni adı; aynı org.tensorflow.lite API'si) — sahne, Zero-DCE, MiDaS modelleri.
+    // TFLite 2.16 yerel kütüphaneleri Android 15'in 16 KB bellek sayfalarına hizalı değildi.
+    // select-tf-ops (68 MB) kaldırıldı: modellerin hiçbiri TF "Flex" operasyonu kullanmıyor.
+    implementation("com.google.ai.edge.litert:litert:1.4.2")
+    implementation("com.google.ai.edge.litert:litert-api:1.4.2")
+    implementation("com.google.ai.edge.litert:litert-gpu:1.4.2")
+    implementation("com.google.ai.edge.litert:litert-gpu-api:1.4.2")
 
-    // OpenCV & ZXing (100% Offline Sensor ISP & Barcode Engine)
-    implementation("com.quickbirdstudios:opencv:4.5.3.0")
-    implementation("com.google.zxing:core:3.5.3")
+    // OpenCV (resmi Android paketi; 16 KB sayfa hizalı). Eskiden 2021 tarihli quickbird 4.5.3 kullanılıyordu.
+    implementation("org.opencv:opencv:4.13.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }

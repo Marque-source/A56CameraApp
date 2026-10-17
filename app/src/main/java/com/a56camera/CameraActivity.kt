@@ -28,7 +28,6 @@ import com.a56camera.camera.CameraModule
 import com.a56camera.camera.CaptureMode
 import com.a56camera.camera.FlashMode
 import com.a56camera.camera.GridType
-import com.a56camera.camera.HdrMode
 import com.a56camera.camera.PanoramaCapture
 import com.a56camera.camera.TimeLapseCapture
 import com.a56camera.camera.TimerMode
@@ -54,7 +53,6 @@ class CameraActivity : AppCompatActivity() {
     private var currentMode = CaptureMode.PHOTO
     private var flashMode = FlashMode.AUTO
     private var timerMode = TimerMode.OFF
-    private var hdrMode = HdrMode.AUTO
     private var gridType = GridType.OFF
     private var histogramEnabled = false
     private var isRecording = false
@@ -113,11 +111,44 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    // ─── İzinler ───
+    // Yalnızca kamera izni zorunlu. Eskiden mikrofon ve galeri izinleri de zorunluydu: biri reddedilirse
+    // (ya da Android 14+ "Seçili fotoğraflar" seçilirse) kamera hiç açılmıyordu.
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        if (result.all { it.value } || PermissionUtils.hasAllPermissions(this)) initCamera()
-        else Toast.makeText(this, R.string.permission_denied, Toast.LENGTH_LONG).show()
+    ) {
+        if (PermissionUtils.hasAllPermissions(this)) initCamera() else showCameraPermissionDenied()
+    }
+
+    /** Mikrofon izni video kaydı başlatılırken istenir; reddedilirse video sessiz kaydedilir. */
+    private var audioPermissionAsked = false
+    private val audioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) Toast.makeText(this, "Mikrofon izni yok: video sessiz kaydedilecek", Toast.LENGTH_SHORT).show()
+        startVideoRecording()
+    }
+
+    private var cameraInitialized = false
+    private var cameraStarted = false
+    private var timerRunning = false
+    private var timerRunnable: Runnable? = null
+    private val shutterSound by lazy { android.media.MediaActionSound() }
+    private val panoExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    private fun showCameraPermissionDenied() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Kamera izni gerekli")
+            .setMessage("Fotoğraf çekebilmek için kamera iznine ihtiyaç var.")
+            .setPositiveButton("Ayarları aç") { _, _ ->
+                startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", packageName, null)))
+            }
+            .setNegativeButton("Tekrar dene") { _, _ ->
+                permissionLauncher.launch(PermissionUtils.requiredPermissions())
+            }
+            .setCancelable(false)
+            .show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,8 +158,9 @@ class CameraActivity : AppCompatActivity() {
         binding = ActivityCameraBinding.inflate(layoutInflater)
         setContentView(binding.root)
         enableFullscreen()
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
+        applyCutoutInsets()
+        // Not: Eskiden setShowWhenLocked/setTurnScreenOn ile uygulama kilit ekranının üstünde açık
+        // kalabiliyordu; kilitli telefonda son fotoğrafın küçük resmi görünüyordu. Kaldırıldı.
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         if (!PermissionUtils.hasCameraHardware(this)) {
@@ -157,6 +189,23 @@ class CameraActivity : AppCompatActivity() {
 
         if (PermissionUtils.hasAllPermissions(this)) initCamera()
         else permissionLauncher.launch(PermissionUtils.requiredPermissions())
+    }
+
+    /** Üst çubuğu ön kamera deliğinin (display cutout) altına it; alt paneli hareket çubuğundan uzak tut. */
+    private fun applyCutoutInsets() {
+        val baseTop = (24 * resources.displayMetrics.density).toInt()
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+            val nav = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars())
+            (binding.topBar.layoutParams as? android.view.ViewGroup.MarginLayoutParams)?.let { lp ->
+                val top = maxOf(baseTop, cutout.top + baseTop / 3)
+                if (lp.topMargin != top) { lp.topMargin = top; binding.topBar.layoutParams = lp }
+            }
+            val baseBottom = (32 * resources.displayMetrics.density).toInt()
+            binding.bottomPanel.setPadding(binding.bottomPanel.paddingLeft, binding.bottomPanel.paddingTop,
+                binding.bottomPanel.paddingRight, maxOf(baseBottom, nav.bottom + baseBottom / 4))
+            insets
+        }
     }
 
     private fun enableFullscreen() {
@@ -195,16 +244,27 @@ class CameraActivity : AppCompatActivity() {
             }
         }
 
-        if (binding.previewView.isAvailable) {
-            camera.start()
-        } else {
-            binding.previewView.onSurfaceReady = { _, _, _ -> camera.start() }
-        }
         camera.flashMode = flashMode
         applyGrid()
         binding.histogram.isVisible = histogramEnabled
         updateGalleryThumb()
+        cameraInitialized = true
+        startCameraIfPossible()
         handleIntent(intent)
+    }
+
+    /**
+     * Kamerayı yalnızca bir kez başlatır. Eskiden onCreate ve onResume ikisi de start() çağırıyor,
+     * kamera iki kez açılıyor ve her dönüşte yapay zeka modelleri yeniden yükleniyordu.
+     */
+    private fun startCameraIfPossible() {
+        if (!cameraInitialized || cameraStarted || !PermissionUtils.hasAllPermissions(this)) return
+        if (binding.previewView.isAvailable) {
+            cameraStarted = true
+            camera.start()
+        } else {
+            binding.previewView.onSurfaceReady = { _, _, _ -> startCameraIfPossible() }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -231,7 +291,7 @@ class CameraActivity : AppCompatActivity() {
                 binding.modeContainer.select(targetMode)
             } catch (_: Exception) {}
         }
-        val zoomVal = intent?.getFloatExtra("zoom", -1f) ?: -1f
+        val zoomVal = if (BuildConfig.DEBUG) intent?.getFloatExtra("zoom", -1f) ?: -1f else -1f
         if (zoomVal >= 1.8f) {
             selectModule(CameraModule.TELE_2X)
         } else if (zoomVal in 0.8f..1.2f) {
@@ -239,7 +299,9 @@ class CameraActivity : AppCompatActivity() {
         } else if (zoomVal in 0.3f..0.7f) {
             selectModule(CameraModule.ULTRA_WIDE)
         }
-        if (intent?.getBooleanExtra("capture", false) == true) {
+        // Otomatik deklanşör yalnızca geliştirme (debug) sürümünde: dışarıdaki herhangi bir uygulamanın
+        // bu kamerayı açıp kullanıcının haberi olmadan fotoğraf çektirmesini önler.
+        if (BuildConfig.DEBUG && intent?.getBooleanExtra("capture", false) == true) {
             binding.root.postDelayed({ onShutterPressed() }, 800)
         }
     }
@@ -258,8 +320,13 @@ class CameraActivity : AppCompatActivity() {
     private var isPixelSettingsOpen: Boolean = false
 
     private fun switchMode(mode: CaptureMode) {
-        if (isRecording) return
+        if (isRecording || timerRunning) return
+        val wasVideo = currentMode.isVideo
         currentMode = mode
+        // Video/time-lapse 16:9 kaydedilir; önizleme de 16:9 olsun ki görülen = kaydedilen
+        if (::camera.isInitialized && mode.isVideo != wasVideo) {
+            camera.aspectRatio = if (mode.isVideo) AspectRatio.RATIO_16_9 else currentAspectRatio
+        }
         val isPro = (mode == CaptureMode.PRO)
         binding.proPanel.root.isVisible = isPro
         binding.histogram.isVisible = isPro || histogramEnabled
@@ -279,8 +346,7 @@ class CameraActivity : AppCompatActivity() {
         binding.shutterInner.setBackgroundResource(
             if (mode.isVideo) R.drawable.bg_shutter_video else R.drawable.bg_shutter_pixel
         )
-        camera.setExtensionForMode(mode, hdrMode)
-        camera.refreshPreview()
+        camera.clearFocusLock()
 
         // Pixel tarzı üst pill metnini güncelle
         updateQuickSettingsPill()
@@ -411,6 +477,9 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun selectVideoEis(enabled: Boolean) {
+        if (enabled && ::camera.isInitialized && !camera.isVideoStabilizationSupported()) {
+            Toast.makeText(this, "Bu kamera video sabitlemeyi (EIS) uygulamalara açmıyor", Toast.LENGTH_SHORT).show()
+        }
         selectedVideoEis = enabled
         prefs().edit().putBoolean("pref_video_eis", enabled).apply()
         refreshVideoSettingsUi()
@@ -493,7 +562,7 @@ class CameraActivity : AppCompatActivity() {
 
     private fun selectPhotoRatio(ratio: AspectRatio) {
         currentAspectRatio = ratio
-        if (::camera.isInitialized) camera.aspectRatio = currentAspectRatio
+        if (::camera.isInitialized && !currentMode.isVideo) camera.aspectRatio = currentAspectRatio
         refreshPhotoSettingsUi()
     }
 
@@ -609,7 +678,7 @@ class CameraActivity : AppCompatActivity() {
             AspectRatio.RATIO_FULL -> AspectRatio.RATIO_4_3
         }
         binding.btnAspectRatio.text = currentAspectRatio.label
-        if (::camera.isInitialized) camera.aspectRatio = currentAspectRatio
+        if (::camera.isInitialized && !currentMode.isVideo) camera.aspectRatio = currentAspectRatio
         Toast.makeText(this, "Fotoğraf Oranı: ${currentAspectRatio.label}", Toast.LENGTH_SHORT).show()
     }
 
@@ -648,31 +717,16 @@ class CameraActivity : AppCompatActivity() {
         }, Toast.LENGTH_SHORT).show()
     }
 
-    private fun cycleHdr() {
-        hdrMode = when (hdrMode) {
-            HdrMode.AUTO -> HdrMode.ON
-            HdrMode.ON -> HdrMode.OFF
-            HdrMode.OFF -> HdrMode.AUTO
+    /** Izgara Ayarlar → "Izgara" seçeneğinden gelir (eskiden ekranda açacak bir düğme yoktu). */
+    private fun applyGrid() {
+        gridType = when (prefs().getString("pref_grid", "off")) {
+            "3x3" -> GridType.GRID_3X3
+            "square" -> GridType.SQUARE
+            "golden" -> GridType.GOLDEN
+            else -> GridType.OFF
         }
-        if (::camera.isInitialized) camera.setExtensionForMode(currentMode, hdrMode)
-        Toast.makeText(this, when (hdrMode) {
-            HdrMode.AUTO -> R.string.hdr_auto
-            HdrMode.ON -> R.string.hdr_on
-            HdrMode.OFF -> R.string.hdr_off
-        }, Toast.LENGTH_SHORT).show()
+        binding.gridOverlay.gridType = gridType
     }
-
-    private fun cycleGrid() {
-        gridType = when (gridType) {
-            GridType.OFF -> GridType.GRID_3X3
-            GridType.GRID_3X3 -> GridType.GOLDEN
-            GridType.GOLDEN -> GridType.SQUARE
-            GridType.SQUARE -> GridType.OFF
-        }
-        applyGrid()
-    }
-
-    private fun applyGrid() { binding.gridOverlay.gridType = gridType }
 
     private fun setupZoomBar() {
         binding.btnZoomUltra.setOnClickListener { selectModule(CameraModule.ULTRA_WIDE) }
@@ -681,8 +735,9 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun selectModule(module: CameraModule) {
-        camera.selectModule(module)
-        
+        if (isRecording) return
+        if (!camera.selectModule(module)) return
+
         val selectedBg = R.drawable.bg_zoom_button_selected
         val unselectedBg = R.drawable.bg_circle_control_translucent
         
@@ -709,6 +764,13 @@ class CameraActivity : AppCompatActivity() {
                     camera.toggleLens()
                 }
                 return true
+            }
+            override fun onLongPress(e: MotionEvent) {
+                // Uzun basma: AF/AE kilidi (eskiden dokunma dinleyicisi uzun basmayı yuttuğu için hiç çalışmıyordu)
+                if (scaleDetector.isInProgress || camera.focus.isManual()) return
+                camera.focusAt(e.x, e.y, lock = true)
+                binding.focusRing.showAt(e.x, e.y, isLocked = true, currentEvProgress = 0f, evLabel = "KİLİTLİ")
+                Toast.makeText(this@CameraActivity, "AF/AE kilitlendi (açmak için başka yere dokunun)", Toast.LENGTH_SHORT).show()
             }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 camera.focusAt(e.x, e.y, lock = false)
@@ -797,14 +859,6 @@ class CameraActivity : AppCompatActivity() {
             true
         }
 
-        binding.previewView.setOnLongClickListener {
-            val cx = binding.previewView.width / 2f
-            val cy = binding.previewView.height / 2f
-            camera.focusAt(cx, cy, lock = true)
-            binding.focusRing.showAt(cx, cy, isLocked = true, currentEvProgress = 0f, evLabel = "KİLİTLİ")
-            Toast.makeText(this, "AF/AE Kilitli", Toast.LENGTH_SHORT).show()
-            true
-        }
     }
 
     private val hideZoomLabel = Runnable {
@@ -856,30 +910,47 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun onShutterPressed() {
-        if (timerMode != TimerMode.OFF && !currentMode.isVideo && !isRecording) startTimerThenCapture()
+        if (!cameraStarted) return
+        if (timerRunning) { cancelTimer(); return }   // geri sayım sırasında tekrar basmak iptal eder
+        if (timerMode != TimerMode.OFF && !currentMode.isVideo && currentMode != CaptureMode.PANORAMA && !isRecording) startTimerThenCapture()
         else performCapture()
     }
 
     private fun startTimerThenCapture() {
         var remaining = timerMode.seconds
+        timerRunning = true
         binding.statusChip.isVisible = true
-        val handler = binding.root.handler
         val tick = object : Runnable {
             override fun run() {
+                if (!timerRunning) return
                 if (remaining <= 0) {
+                    timerRunning = false
                     binding.statusChip.isVisible = false
                     performCapture()
                 } else {
                     binding.statusChip.text = remaining.toString()
                     remaining--
-                    handler?.postDelayed(this, 1000)
+                    binding.root.postDelayed(this, 1000)
                 }
             }
         }
-        handler?.post(tick)
+        timerRunnable = tick
+        binding.root.post(tick)
+    }
+
+    private fun cancelTimer() {
+        timerRunning = false
+        timerRunnable?.let { binding.root.removeCallbacks(it) }
+        timerRunnable = null
+        binding.statusChip.isVisible = false
     }
 
     private fun performCapture() {
+        // Çok kareli çekim sürerken ikinci bir çekim kareleri karıştırıyordu
+        if ((currentMode == CaptureMode.NIGHT || currentMode == CaptureMode.PORTRAIT) && camera.isBurstInProgress()) {
+            Toast.makeText(this, "Önceki çekim bitmeden yeni çekim yapılamaz", Toast.LENGTH_SHORT).show()
+            return
+        }
         when (currentMode) {
             CaptureMode.VIDEO -> toggleVideo()
             CaptureMode.TIME_LAPSE -> toggleTimeLapse()
@@ -1064,40 +1135,77 @@ class CameraActivity : AppCompatActivity() {
 
     private fun toggleVideo() {
         if (isRecording) {
-            val uri = videoCapture.stop()
-            isRecording = false
-            binding.statusChip.isVisible = false
-            camera.stopRecordingReturnPreview()
-            if (uri != null) {
-                Toast.makeText(this, R.string.video_saved, Toast.LENGTH_SHORT).show()
-                updateGalleryThumb()
-            }
+            stopVideo(returnToPreview = true)
         } else {
-            val withAudio = PermissionUtils.isGranted(this, Manifest.permission.RECORD_AUDIO)
-            val quality = videoQuality()
-            val codec = if (prefs().getString("pref_video_codec", "h264") == "h265")
-                VideoCapture.Codec.H265 else VideoCapture.Codec.H264
-            val surface = videoCapture.prepare(quality, codec, withAudio, camera.currentDeviceRotationOrientation(deviceRotationDegrees()))
-            if (surface == null) {
-                Toast.makeText(this, R.string.error_capture, Toast.LENGTH_SHORT).show(); return
+            val hasAudio = PermissionUtils.isGranted(this, Manifest.permission.RECORD_AUDIO)
+            if (!hasAudio && !audioPermissionAsked) {
+                audioPermissionAsked = true
+                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)  // sonuçta startVideoRecording()
+                return
             }
-            closeQuickSettings()
-            camera.startVideoSession(surface, fps = selectedVideoFps) {
-                videoCapture.start()
-                isRecording = true
-                binding.statusChip.isVisible = true
-                binding.statusChip.text = getString(R.string.recording)
+            startVideoRecording()
+        }
+    }
+
+    /** Seçilen kaliteyi, kamera desteklemiyorsa desteklenen en yakın kaliteye düşürür. */
+    private fun supportedVideoQuality(): VideoCapture.Quality {
+        var q = videoQuality()
+        if (!camera.supportsVideo(q.size.width, q.size.height, q.fps)) {
+            val fallback = when (q) {
+                VideoCapture.Quality.UHD_60 -> if (camera.supportsVideo(3840, 2160, 30)) VideoCapture.Quality.UHD_30 else VideoCapture.Quality.FHD_60
+                VideoCapture.Quality.UHD_30 -> VideoCapture.Quality.FHD_30
+                VideoCapture.Quality.FHD_60 -> VideoCapture.Quality.FHD_30
+                else -> q
+            }
+            if (fallback != q) {
+                Toast.makeText(this, "${q.size.height}p@${q.fps} bu kamerada yok, ${fallback.size.height}p@${fallback.fps} kullanılıyor", Toast.LENGTH_SHORT).show()
+                q = if (!camera.supportsVideo(fallback.size.width, fallback.size.height, fallback.fps)) VideoCapture.Quality.FHD_30 else fallback
             }
         }
+        return q
+    }
+
+    private fun startVideoRecording() {
+        if (isRecording || currentMode != CaptureMode.VIDEO) return
+        val withAudio = PermissionUtils.isGranted(this, Manifest.permission.RECORD_AUDIO)
+        val quality = supportedVideoQuality()
+        val codec = if (prefs().getString("pref_video_codec", "h264") == "h265")
+            VideoCapture.Codec.H265 else VideoCapture.Codec.H264
+        val surface = videoCapture.prepare(quality, codec, withAudio, camera.currentDeviceRotationOrientation(deviceRotationDegrees()))
+        if (surface == null) {
+            Toast.makeText(this, R.string.error_capture, Toast.LENGTH_SHORT).show(); return
+        }
+        closeQuickSettings()
+        isRecording = true
+        val eis = selectedVideoEis && camera.isVideoStabilizationSupported()
+        camera.startVideoSession(surface, fps = quality.fps, stabilization = eis) {
+            videoCapture.start()
+            playSound(android.media.MediaActionSound.START_VIDEO_RECORDING)
+            binding.statusChip.isVisible = true
+            binding.statusChip.text = getString(R.string.recording)
+        }
+    }
+
+    /**
+     * Kaydı durdurur ve KAYDEDER. Eskiden uygulamadan çıkınca/ekran kilitlenince kayıt iptal edilip
+     * dosya siliniyordu.
+     */
+    private fun stopVideo(returnToPreview: Boolean) {
+        camera.prepareStopRecording()
+        val uri = videoCapture.stop()
+        isRecording = false
+        binding.statusChip.isVisible = false
+        playSound(android.media.MediaActionSound.STOP_VIDEO_RECORDING)
+        if (returnToPreview) camera.stopRecordingReturnPreview()
+        if (uri != null) {
+            Toast.makeText(this, R.string.video_saved, Toast.LENGTH_SHORT).show()
+            updateGalleryThumb(uri)
+        } else Toast.makeText(this, R.string.error_capture, Toast.LENGTH_SHORT).show()
     }
 
     private fun toggleTimeLapse() {
         if (isRecording) {
-            val uri = timeLapse.stop()
-            isRecording = false
-            binding.statusChip.isVisible = false
-            camera.stopRecordingReturnPreview()
-            if (uri != null) { Toast.makeText(this, R.string.video_saved, Toast.LENGTH_SHORT).show(); updateGalleryThumb() }
+            stopTimeLapse(returnToPreview = true)
         } else {
             val interval = when (prefs().getString("pref_timelapse_interval", "1")) {
                 "0.5" -> TimeLapseCapture.Interval.HALF
@@ -1110,44 +1218,84 @@ class CameraActivity : AppCompatActivity() {
             val surface = timeLapse.prepare(interval, orientationHint = camera.currentDeviceRotationOrientation(deviceRotationDegrees())) ?: run {
                 Toast.makeText(this, R.string.error_capture, Toast.LENGTH_SHORT).show(); return
             }
+            isRecording = true
             camera.startVideoSession(surface) {
                 timeLapse.start()
-                isRecording = true
                 binding.statusChip.isVisible = true
                 binding.statusChip.text = getString(R.string.recording)
             }
         }
     }
 
+    private fun stopTimeLapse(returnToPreview: Boolean) {
+        camera.prepareStopRecording()
+        val uri = timeLapse.stop()
+        isRecording = false
+        binding.statusChip.isVisible = false
+        if (returnToPreview) camera.stopRecordingReturnPreview()
+        if (uri != null) { Toast.makeText(this, R.string.video_saved, Toast.LENGTH_SHORT).show(); updateGalleryThumb(uri) }
+        else Toast.makeText(this, "Kayıt çok kısa: henüz hiç kare alınmadı", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Panorama: kareler önizlemeden alınır (galeriye kaydedilmez), durdurunca birleştirilir.
+     * Eskiden her açı adımında galeriye ayrı fotoğraf kaydediliyor ve birleştirme hiç çalışmıyordu.
+     */
     private fun togglePanorama() {
         if (isRecording) {
-            panorama.stop()
-            isRecording = false
-            binding.statusChip.isVisible = false
-            Thread {
-                val uri = panorama.stitchAndSave()
-                runOnUiThread {
-                    if (uri != null) { Toast.makeText(this, R.string.photo_saved, Toast.LENGTH_SHORT).show(); updateGalleryThumb(uri) }
-                    else Toast.makeText(this, R.string.error_capture, Toast.LENGTH_SHORT).show()
-                }
-            }.start()
+            stopPanorama()
         } else {
+            panorama.horizontalFovRad = camera.portraitHorizontalFovRad()
             panorama.onAngleUpdate = { angle ->
-                runOnUiThread { binding.statusChip.text = "${angle.toInt()}° · ${panorama.frameCount()} kare" }
+                runOnUiThread { binding.statusChip.text = "${angle.toInt()}° · ${panorama.frameCount()} kare — bitirmek için tekrar basın" }
             }
-            panorama.onCaptureFrameNeeded = {
-                camera.capturePhoto(null, deviceRotationDegrees(),
-                    onSaved = { },
-                    onErr = {})
-            }
+            panorama.onCaptureFrameNeeded = { runOnUiThread { grabPanoramaFrame() } }
             isRecording = true
             binding.statusChip.isVisible = true
-            binding.statusChip.text = getString(R.string.recording)
-            panorama.start()
+            binding.statusChip.text = "Telefonu dik tutup yavaşça yana çevirin"
+            if (!panorama.start()) {
+                isRecording = false
+                binding.statusChip.isVisible = false
+                Toast.makeText(this, "Bu cihazda jiroskop yok, panorama çekilemez", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun grabPanoramaFrame() {
+        if (!binding.previewView.isAvailable) return
+        val full = binding.previewView.bitmap ?: return
+        val r = binding.previewView.contentRect()
+        val crop = try {
+            android.graphics.Bitmap.createBitmap(full, r.left.toInt().coerceAtLeast(0), r.top.toInt().coerceAtLeast(0),
+                r.width().toInt().coerceAtMost(full.width), r.height().toInt().coerceAtMost(full.height))
+        } catch (_: Exception) { full }
+        if (crop !== full) full.recycle()
+        playSound(android.media.MediaActionSound.FOCUS_COMPLETE)
+        panoExecutor.execute { panorama.addFrame(crop); crop.recycle() }
+    }
+
+    private fun stopPanorama() {
+        panorama.stop()
+        isRecording = false
+        binding.statusChip.text = "Panorama birleştiriliyor..."
+        panoExecutor.execute {
+            val uri = panorama.stitchAndSave()
+            runOnUiThread {
+                binding.statusChip.isVisible = false
+                if (uri != null) { Toast.makeText(this, "Panorama kaydedildi", Toast.LENGTH_SHORT).show(); updateGalleryThumb(uri) }
+                else Toast.makeText(this, "Panorama için en az 2 kare gerekli: telefonu biraz daha çevirin", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun playSound(sound: Int) {
+        if (prefs().getBoolean("pref_capture_sound", true)) {
+            try { shutterSound.play(sound) } catch (_: Throwable) {}
         }
     }
 
     private fun animateShutter() {
+        playSound(android.media.MediaActionSound.SHUTTER_CLICK)
         binding.previewView.animate().alpha(0.3f).setDuration(60).withEndAction {
             binding.previewView.animate().alpha(1f).setDuration(60).start()
         }.start()
@@ -1258,15 +1406,20 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    /** Bu uygulamanın son kaydettiği fotoğraf/video (galeri düğmesi bunu gösterir). */
+    private var lastCapturedUri: Uri? = null
+
     private fun updateGalleryThumb(uri: Uri? = null) {
-        val target = uri ?: MediaStoreHelper.latestImageUri(this) ?: return
+        if (uri != null) lastCapturedUri = uri
+        // Galeri izni istenmediği için MediaStore yalnızca bu uygulamanın kendi dosyalarını döndürür
+        val target = uri ?: lastCapturedUri ?: MediaStoreHelper.latestImageUri(this) ?: return
         Glide.with(this).load(target).centerCrop().circleCrop().into(binding.btnGallery)
     }
 
     private fun openGallery() {
-        val uri = MediaStoreHelper.latestImageUri(this)
+        val uri = lastCapturedUri ?: MediaStoreHelper.latestImageUri(this)
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            if (uri != null) setDataAndType(uri, "image/*") else type = "image/*"
+            if (uri != null) setDataAndType(uri, contentResolver.getType(uri) ?: "image/*") else type = "image/*"
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         try { startActivity(intent) } catch (e: Exception) {
@@ -1356,6 +1509,11 @@ class CameraActivity : AppCompatActivity() {
                 }
                 setResult(RESULT_OK, Intent("inline-data").putExtra("data", thumb))
             }
+            // Başka uygulama için çekilen fotoğraf kullanıcının galerisinde kalmasın
+            // (ör. bir banka uygulamasına çekilen kimlik fotoğrafı)
+            withContext(Dispatchers.IO) {
+                try { contentResolver.delete(savedUri, null, null) } catch (_: Exception) {}
+            }
             finish()
         }
         return true
@@ -1376,12 +1534,11 @@ class CameraActivity : AppCompatActivity() {
         histogramHandler.removeCallbacks(histogramTick)
         histogramHandler.post(histogramTick)
         startLocationUpdates()
+        applyGrid()
         if (::camera.isInitialized) {
-            if (binding.previewView.isAvailable) {
-                camera.start()
-            } else {
-                binding.previewView.onSurfaceReady = { _, _, _ -> camera.start() }
-            }
+            // Kullanıcı kamera iznini Ayarlar'dan verip geri döndüyse
+            if (!cameraInitialized && PermissionUtils.hasAllPermissions(this)) initCamera()
+            else startCameraIfPossible()
         }
     }
 
@@ -1389,21 +1546,26 @@ class CameraActivity : AppCompatActivity() {
         super.onPause()
         histogramHandler.removeCallbacks(histogramTick)
         stopLocationUpdates()
+        cancelTimer()
         if (isRecording) {
+            // Kayıt iptal edilip silinmez, kaydedilir
             when (currentMode) {
-                CaptureMode.VIDEO -> videoCapture.cancel()
-                CaptureMode.TIME_LAPSE -> timeLapse.cancel()
-                CaptureMode.PANORAMA -> panorama.stop()
+                CaptureMode.VIDEO -> stopVideo(returnToPreview = false)
+                CaptureMode.TIME_LAPSE -> stopTimeLapse(returnToPreview = false)
+                CaptureMode.PANORAMA -> stopPanorama()
                 else -> {}
             }
             isRecording = false
         }
         if (::camera.isInitialized) camera.release()
+        cameraStarted = false
     }
 
     override fun onDestroy() {
         super.onDestroy()
         orientationEventListener?.disable()
-        if (::camera.isInitialized) camera.release()
+        if (::camera.isInitialized) camera.destroy()
+        panoExecutor.shutdown()
+        try { shutterSound.release() } catch (_: Throwable) {}
     }
 }

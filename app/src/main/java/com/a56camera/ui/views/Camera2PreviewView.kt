@@ -27,6 +27,8 @@ class Camera2PreviewView @JvmOverloads constructor(
 
     private var bufferSize: Size = Size(1920, 1080)
     private var sensorOrientation: Int = 90
+    private var lastScaleX = 1f
+    private var lastScaleY = 1f
 
     init {
         surfaceTextureListener = object : SurfaceTextureListener {
@@ -91,8 +93,16 @@ class Camera2PreviewView @JvmOverloads constructor(
         val cy = viewHeight / 2f
         matrix.setScale(scaleX, scaleY, cx, cy)
         setTransform(matrix)
+        lastScaleX = scaleX
+        lastScaleY = scaleY
     }
 
-    /** Dokunma koordinatını gerçek gösterilen içerik alanına göre normalize eder. */
-    fun contentRect(): RectF = RectF(0f, 0f, width.toFloat(), height.toFloat())
+    /** Önizleme görüntüsünün görünüm içinde gerçekten kapladığı alan (siyah kenarlar hariç). */
+    fun contentRect(): RectF {
+        val w = width * lastScaleX
+        val h = height * lastScaleY
+        val left = (width - w) / 2f
+        val top = (height - h) / 2f
+        return RectF(left, top, left + w, top + h)
+    }
 }

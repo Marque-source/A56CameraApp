@@ -27,8 +27,6 @@ enum class FlashMode { AUTO, ON, OFF, TORCH }
 /** Zamanlayıcı seçenekleri (saniye). */
 enum class TimerMode(val seconds: Int) { OFF(0), THREE(3), TEN(10) }
 
-/** HDR durumu. */
-enum class HdrMode { AUTO, ON, OFF }
 
 /** Izgara tipleri. */
 enum class GridType { OFF, GRID_3X3, SQUARE, GOLDEN }

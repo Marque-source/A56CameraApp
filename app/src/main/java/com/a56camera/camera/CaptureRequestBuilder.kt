@@ -45,7 +45,9 @@ class CaptureRequestBuilder(
         forVideo: Boolean = false,
         jpegOrientation: Int = 0,
         location: Location? = null,
-        forYuvBurst: Boolean = false
+        forYuvBurst: Boolean = false,
+        /** Önizleme isteği mi? Pro modda uzun pozlamalar önizlemeyi dondurmasın diye sınırlandırılır. */
+        forPreview: Boolean = false
     ): CaptureRequest.Builder? {
         if (surfaces.isEmpty()) {
             Log.w(TAG, "Surface listesi boş, request iptal")
@@ -79,7 +81,7 @@ class CaptureRequestBuilder(
 
         safeSet(builder, CaptureRequest.CONTROL_EFFECT_MODE, processing.effectMode)
 
-        exposure.applyTo(builder)
+        exposure.applyTo(builder, forPreview)
         focus.applyTo(builder, forVideo)
         whiteBalance.applyTo(builder)
         zoom.applyTo(builder)
@@ -269,8 +271,4 @@ class CaptureRequestBuilder(
         }
     }
 
-    fun applyTouchFocus(builder: CaptureRequest.Builder, x: Float, y: Float, previewW: Int, previewH: Int) {
-        focus.setMeteringPoint(builder, x, y, previewW, previewH, zoom.currentCropRegion())
-        focus.triggerAf(builder)
-    }
 }

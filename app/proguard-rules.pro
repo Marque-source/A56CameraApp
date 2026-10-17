@@ -10,3 +10,13 @@
 -dontwarn com.google.ai.edge.litert.**
 -dontwarn org.tensorflow.lite.**
 -dontwarn org.jetbrains.annotations.**
+
+# Yayın sürümünde ayrıntılı günlükleri kaldır (uyarı ve hatalar kalır)
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
+
+# Kullanılmayan TFLite/OpenCV sınıflarına dair uyarılar
+-dontwarn org.opencv.**

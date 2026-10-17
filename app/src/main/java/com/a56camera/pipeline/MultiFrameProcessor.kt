@@ -1,15 +1,10 @@
 package com.a56camera.pipeline
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.util.Log
 import com.a56camera.camera.YuvFrame
-import com.a56camera.camera.toNv21
 import org.opencv.android.Utils
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.Core
@@ -26,7 +21,6 @@ import org.opencv.features2d.ORB
 import org.opencv.imgproc.CLAHE
 import org.opencv.imgproc.Imgproc
 import org.opencv.photo.Photo
-import java.io.ByteArrayOutputStream
 
 /**
  * Samsung S25 / iPhone tarzı çoklu kare ORB hizalamalı ve Mertens Exposure Fusion işlemcisi.
@@ -317,15 +311,6 @@ class MultiFrameProcessor {
         // Homografi bulunamadıysa veya bozuksa, kareyi ÇÖPE ATMA!
         // Donanım OIS aktif olduğu için titreşim < 2 pikseldir; NEON MAD kernel zaten korur.
         return aligned ?: frame.clone()
-    }
-
-    private fun unsharpMask(src: Mat, sigma: Double, strength: Double): Mat {
-        val blurred = Mat()
-        Imgproc.GaussianBlur(src, blurred, Size(0.0, 0.0), sigma)
-        val sharpened = Mat()
-        Core.addWeighted(src, 1.0 + strength, blurred, -strength, 0.0, sharpened)
-        blurred.release()
-        return sharpened
     }
 
     private fun yuvToMat(frame: YuvFrame): Mat {
