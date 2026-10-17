@@ -1,0 +1,29 @@
+Pixora, telefonunun kamerasından daha fazlasını çıkarmak için tasarlanmış, reklamsız ve açık kaynaklı bir kamera uygulamasıdır.
+
+🌙 GECE MODU
+Pixora karanlıkta tek kare yerine art arda 5 kare çeker, hareket eden bölgeleri koruyarak birleştirir ve gürültüyü akıllıca azaltır. Sonuç: daha aydınlık, daha temiz gece fotoğrafları.
+
+👤 PORTRE MODU
+Telefonun üzerinde çalışan yapay zekâ derinlik haritası, konuyu arka plandan ayırır ve doğal bir arka plan bulanıklığı uygular.
+
+🎛️ PRO MODU
+Pozlama telafisi, beyaz dengesi, renk profilleri (Doğal, Monokrom, Flat Log) ve canlı histogram. Telefonun izin verdiği cihazlarda ISO, enstantane ve elle odak da açılır.
+
+📸 DAHA FAZLASI
+• Panorama: jiroskop rehberliğinde çek, otomatik birleştir
+• Video: telefonun desteklediği ölçüde 4K'ya kadar, H.264 veya H.265
+• Hızlandırılmış çekim (time-lapse)
+• Ultra geniş, ana ve 2x arasında tek dokunuşla geçiş
+• Dokunarak odak ve pozlama, uzun basarak AF/AE kilidi
+• Izgara (3x3, kare, altın oran), zamanlayıcı, flaş
+• Ses tuşlarıyla çekim
+• Telefon destekliyorsa RAW (DNG) çekim
+• Sahne algılama
+
+🔒 GİZLİLİK
+Pixora'nın internet izni yoktur. Fotoğrafların ve videoların telefonundan dışarı çıkmaz. Tüm yapay zekâ işlemleri cihazda yapılır. Konum etiketi isteğe bağlıdır ve varsayılan olarak kapalıdır.
+
+⚙️ UYUMLULUK
+Android 9 ve üzeri. Bazı özellikler (RAW, elle ISO/enstantane, 60 FPS video, video sabitleme) telefonun kamera donanımının uygulamalara izin vermesine bağlıdır; Pixora telefonunda olmayan seçenekleri otomatik olarak gizler.
+
+Pixora açık kaynaklıdır: github.com/Marque-source/A56CameraApp
