@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="assets/icon.png">
+<meta property="og:image" content="assets/banner-en.png">
+<title>Pixora Kamera</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Pixora: Android için reklamsız, açık kaynaklı kamera. Karanlıkta bile net.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+html{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)} body{margin:0}
+/* Layout: gece gökyüzü zemini; hero'da sürüklenebilir "1 kare / 5 kare" karşılaştırması, altında süreç, modlar, izinler */
+:root {
+  --night: #0E0A26;
+  --night-2: #17113A;
+  --ink: #F3EFFF;
+  --mist: #B7AFD6;
+  --violet: #7B4DFF;
+  --glow: #FF9B6A;
+  --line: rgba(243, 239, 255, 0.12);
+  --f-display: "Bricolage Grotesque", "Figtree", system-ui, sans-serif;
+  --f-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--night); }
+body {
+  background: var(--night);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--glow); outline-offset: 3px; border-radius: 6px; }
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+[data-l="en"] .tr, [data-l="tr"] .en { display: none !important; }
+
+/* Header */
+header { padding-block: 20px; }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font-family: var(--f-display); font-weight: 700; font-size: 1.35rem; letter-spacing: -0.02em; }
+.brand svg { width: 40px; height: 40px; border-radius: 11px; flex: none; }
+.nav { display: flex; align-items: center; gap: 10px; }
+.lang { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.lang button {
+  font: 500 0.8rem var(--f-mono); letter-spacing: 0.06em; color: var(--mist);
+  background: none; border: 0; border-radius: 999px; padding: 6px 12px; cursor: pointer;
+}
+.lang button[aria-pressed="true"] { background: var(--ink); color: var(--night); }
+.ghost { font-size: 0.95rem; text-decoration: none; color: var(--mist); padding: 8px 4px; }
+.ghost:hover { color: var(--ink); }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 56px; align-items: center; padding-block: 40px 72px; }
+.eyebrow { font: 500 0.78rem var(--f-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--glow); }
+h1 {
+  font-family: var(--f-display); font-weight: 800; letter-spacing: -0.035em;
+  font-size: clamp(2.8rem, 6.4vw, 5rem); line-height: 0.98; margin: 14px 0 22px; text-wrap: balance;
+}
+h1 em { font-style: normal; background: linear-gradient(100deg, var(--ink) 20%, var(--glow)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lede { color: var(--mist); max-width: 34ch; font-size: 1.15rem; margin: 0 0 30px; }
+.ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px; text-decoration: none;
+  font-weight: 600; padding: 14px 22px; border-radius: 14px; border: 1px solid var(--line);
+}
+.btn.primary { background: var(--ink); color: var(--night); border-color: var(--ink); }
+.btn.primary:hover { background: #fff; }
+.btn:not(.primary):hover { border-color: var(--mist); }
+.facts { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 34px; font: 400 0.82rem var(--f-mono); color: var(--mist); }
+.facts b { color: var(--ink); font-weight: 500; }
+
+/* Comparison viewer */
+.viewer { position: relative; }
+.frame {
+  position: relative; aspect-ratio: 4 / 5; max-width: 100%; border-radius: 28px; overflow: hidden;
+  border: 1px solid var(--line); background: #000; touch-action: pan-y; cursor: ew-resize; user-select: none;
+  box-shadow: 0 40px 120px -40px rgba(123, 77, 255, 0.55);
+}
+.frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.frame .after { clip-path: inset(0 0 0 var(--split, 50%)); }
+.divider { position: absolute; top: 0; bottom: 0; left: var(--split, 50%); width: 2px; background: var(--ink); transform: translateX(-1px); pointer-events: none; }
+.knob {
+  position: absolute; top: 50%; left: var(--split, 50%); width: 44px; height: 44px; transform: translate(-50%, -50%);
+  border-radius: 50%; background: var(--ink); color: var(--night); display: grid; place-items: center;
+  font: 500 0.9rem var(--f-mono); pointer-events: none; box-shadow: 0 6px 24px rgba(0,0,0,.45);
+}
+.tag {
+  position: absolute; top: 16px; font: 500 0.72rem var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 7px 10px; border-radius: 8px; background: rgba(14, 10, 38, 0.72); backdrop-filter: blur(6px); color: var(--ink);
+}
+.tag.l { left: 16px; } .tag.r { right: 16px; }
+.hud {
+  position: absolute; left: 16px; right: 16px; bottom: 16px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  font: 400 0.72rem var(--f-mono); color: rgba(243,239,255,.85); pointer-events: none;
+}
+.hud span { background: rgba(14,10,38,.6); padding: 5px 8px; border-radius: 6px; }
+.caption { margin-top: 12px; font-size: 0.85rem; color: var(--mist); }
+#split { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+/* Sections */
+section { padding-block: 72px; border-top: 1px solid var(--line); }
+h2 { font-family: var(--f-display); font-weight: 700; font-size: clamp(1.9rem, 3.6vw, 2.8rem); letter-spacing: -0.025em; line-height: 1.05; margin: 10px 0 14px; text-wrap: balance; max-width: 22ch; }
+.intro { color: var(--mist); max-width: 60ch; margin: 0 0 40px; }
+
+/* Process: gerçek sıra, numaralar anlamlı */
+.steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; counter-reset: s; }
+.steps li { position: relative; padding: 22px 18px 0 0; border-top: 2px solid var(--line); counter-increment: s; min-width: 0; }
+.steps li::before { content: counter(s); position: absolute; top: -15px; left: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--night); border: 2px solid var(--violet); display: grid; place-items: center; font: 500 0.75rem var(--f-mono); color: var(--ink); }
+.steps li:last-child::before { border-color: var(--glow); }
+.steps h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.1rem; margin: 6px 0 6px; }
+.steps p { margin: 0; color: var(--mist); font-size: 0.95rem; }
+
+/* Modes */
+.modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 22px; overflow: hidden; }
+.mode { background: var(--night); padding: 28px 26px 30px; min-width: 0; }
+.mode .k { font: 500 0.72rem var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--glow); }
+.mode h3 { font-family: var(--f-display); font-weight: 700; font-size: 1.45rem; letter-spacing: -0.02em; margin: 6px 0 8px; }
+.mode p { margin: 0; color: var(--mist); font-size: 0.97rem; }
+.extras { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; }
+.extras li { font-size: 0.88rem; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--mist); }
+
+/* Permissions */
+.privacy { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 56px; align-items: start; }
+.perm { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.perm th { text-align: left; font: 500 0.72rem var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--mist); padding: 0 0 10px; border-bottom: 1px solid var(--line); }
+.perm td { padding: 14px 12px 14px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.perm code { font-family: var(--f-mono); font-size: 0.82rem; color: var(--ink); word-break: break-all; }
+.perm .why { color: var(--mist); }
+.pill { display: inline-block; font: 500 0.72rem var(--f-mono); padding: 4px 8px; border-radius: 6px; white-space: nowrap; }
+.pill.no { background: rgba(255, 155, 106, 0.16); color: var(--glow); }
+.pill.opt { background: rgba(183, 175, 214, 0.14); color: var(--mist); }
+.pill.yes { background: rgba(123, 77, 255, 0.22); color: #CDBBFF; }
+.tablewrap { overflow-x: auto; }
+
+/* Compat + footer */
+.compat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+.compat div { min-width: 0; }
+.compat .big { font-family: var(--f-display); font-weight: 800; font-size: 2.4rem; letter-spacing: -0.03em; line-height: 1; }
+.compat p { color: var(--mist); margin: 10px 0 0; font-size: 0.97rem; }
+.closing { text-align: left; }
+footer { padding-block: 36px 48px; border-top: 1px solid var(--line); color: var(--mist); font-size: 0.88rem; }
+footer .bar { align-items: flex-start; }
+
+@media (max-width: 900px) {
+  .hero, .privacy { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .steps { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  .steps li { border-top: 0; border-left: 2px solid var(--line); padding: 0 0 0 26px; }
+  .steps li::before { top: 0; left: -15px; }
+  .modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compat { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .modes { grid-template-columns: minmax(0, 1fr); }
+  .frame { aspect-ratio: 4 / 4.6; }
+  section { padding-block: 56px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+
+
+<div data-l="tr" id="page">
+<header>
+  <div class="wrap bar">
+    <a class="brand" href="#top" id="top" aria-label="Pixora">
+      <svg viewBox="0 0 108 108" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1A1446"/><stop offset=".55" stop-color="#5B2BD9"/><stop offset="1" stop-color="#FF8A5B"/></linearGradient></defs><rect width="108" height="108" fill="url(#g)"/><path fill="#fff" d="M35,35 a5,5 0 0 1 5,-5 h7 v43 a5,5 0 0 1 -5,5 h-2 a5,5 0 0 1 -5,-5 Z"/><path fill="#fff" fill-rule="evenodd" d="M58,30 a19,19 0 1 1 0,38 a19,19 0 1 1 0,-38 Z M58,39 a10,10 0 1 0 0,20 a10,10 0 1 0 0,-20 Z"/><path fill="#FFC9A3" d="M58,43 l1.5,4.5 4.5,1.5 -4.5,1.5 -1.5,4.5 -1.5,-4.5 -4.5,-1.5 4.5,-1.5 Z"/></svg>
+      Pixora
+    </a>
+    <nav class="nav">
+      <a class="ghost" href="https://github.com/Marque-source/A56CameraApp">GitHub</a>
+      <div class="lang" role="group" aria-label="Dil / Language">
+        <button type="button" id="btn-tr" data-set="tr" aria-pressed="true">TR</button>
+        <button type="button" id="btn-en" data-set="en" aria-pressed="false">EN</button>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <div class="eyebrow"><span class="tr">Android kamera uygulaması</span><span class="en">Camera app for Android</span></div>
+      <h1><span class="tr">Karanlıkta <em>bile net.</em></span><span class="en">Clear, <em>even in the dark.</em></span></h1>
+      <p class="lede">
+        <span class="tr">Pixora gece tek kare yerine beş kare çeker, onları birleştirir ve gürültüyü temizler. Reklam yok, hesap yok, internet izni yok.</span>
+        <span class="en">At night Pixora shoots five frames instead of one, merges them and cleans up the noise. No ads, no account, no internet permission.</span>
+      </p>
+      <div class="ctas">
+        <a class="btn primary" href="https://github.com/Marque-source/A56CameraApp/releases"><span class="tr">APK'yı indir</span><span class="en">Download the APK</span> ↓</a>
+        <a class="btn" href="https://github.com/Marque-source/A56CameraApp"><span class="tr">Kaynak kodu</span><span class="en">Source code</span></a>
+      </div>
+      <div class="facts">
+        <span><b>Android 9+</b></span>
+        <span><b>0</b> <span class="tr">reklam</span><span class="en">ads</span></span>
+        <span><b>INTERNET</b> <span class="tr">izni yok</span><span class="en">permission: none</span></span>
+      </div>
+    </div>
+
+    <div class="viewer">
+      <div class="frame" id="frame" style="--split:50%">
+        <canvas id="before" aria-hidden="true"></canvas>
+        <canvas id="after" class="after" aria-hidden="true"></canvas>
+        <div class="divider"></div>
+        <div class="knob">⇆</div>
+        <span class="tag l"><span class="tr">1 kare</span><span class="en">1 frame</span></span>
+        <span class="tag r"><span class="tr">Pixora gece · 5 kare</span><span class="en">Pixora night · 5 frames</span></span>
+        <label for="split" class="tr" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Karşılaştırma kaydırıcısı</label>
+        <input id="split" type="range" min="5" max="95" value="50" aria-label="Before / after">
+      </div>
+      <p class="caption">
+        <span class="tr">Temsili görsel: Pixora'nın gece işlemesinin gürültüye etkisini gösteren bir benzetim. Çizgiyi sürükle.</span>
+        <span class="en">Illustration: a simulation of what Pixora's night processing does to noise. Drag the line.</span>
+      </p>
+    </div>
+  </div>
+
+  <section id="nasil">
+    <div class="wrap">
+      <div class="eyebrow"><span class="tr">Gece modu nasıl çalışır</span><span class="en">How night mode works</span></div>
+      <h2><span class="tr">Deklanşöre bir kez basarsın, gerisini Pixora yapar.</span><span class="en">You press the shutter once. Pixora does the rest.</span></h2>
+      <p class="intro"><span class="tr">Gürültü her karede rastgele, sahne ise aynıdır. Kareleri üst üste koyunca sahne güçlenir, gürültü birbirini götürür.</span><span class="en">Noise is random in every frame while the scene stays the same. Stack the frames and the scene adds up while the noise cancels out.</span></p>
+      <ol class="steps">
+        <li><h3><span class="tr">Beş kare</span><span class="en">Five frames</span></h3><p><span class="tr">Aynı pozlamayla art arda çekilir.</span><span class="en">Shot back to back at the same exposure.</span></p></li>
+        <li><h3><span class="tr">Birleştirme</span><span class="en">Merge</span></h3><p><span class="tr">Hareket eden bölgeler korunarak ortalanır, hayalet oluşmaz.</span><span class="en">Averaged while moving areas are protected, so no ghosting.</span></p></li>
+        <li><h3><span class="tr">Gürültü ölçümü</span><span class="en">Noise estimate</span></h3><p><span class="tr">Kalan gürültü ölçülür, temizlik ona göre ayarlanır.</span><span class="en">Remaining noise is measured and cleanup is tuned to it.</span></p></li>
+        <li><h3><span class="tr">Ton ve renk</span><span class="en">Tone and color</span></h3><p><span class="tr">Gölgeler açılır, renkler doğal kalır.</span><span class="en">Shadows are lifted, colors stay natural.</span></p></li>
+        <li><h3><span class="tr">Kayıt</span><span class="en">Save</span></h3><p><span class="tr">Galeriye JPEG olarak, istersen DNG ile birlikte.</span><span class="en">Saved to your gallery as JPEG, optionally with a DNG.</span></p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="modlar">
+    <div class="wrap">
+      <div class="eyebrow"><span class="tr">Modlar</span><span class="en">Modes</span></div>
+      <h2><span class="tr">Her ışık için bir mod.</span><span class="en">A mode for every kind of light.</span></h2>
+      <p class="intro"><span class="tr">Hepsi tek uygulamada, ekranın altındaki şeritte.</span><span class="en">All in one app, on the strip at the bottom of the screen.</span></p>
+      <div class="modes">
+        <div class="mode"><div class="k"><span class="tr">Gece</span><span class="en">Night</span></div><h3><span class="tr">Az ışıkta temiz</span><span class="en">Clean in low light</span></h3><p><span class="tr">Beş kareyi birleştirip gürültüyü azaltır.</span><span class="en">Merges five frames and reduces noise.</span></p></div>
+        <div class="mode"><div class="k"><span class="tr">Portre</span><span class="en">Portrait</span></div><h3><span class="tr">Doğal arka plan bulanıklığı</span><span class="en">Natural background blur</span></h3><p><span class="tr">Telefonda çalışan yapay zekâ derinlik haritası konuyu arka plandan ayırır.</span><span class="en">An on-device AI depth map separates the subject from the background.</span></p></div>
+        <div class="mode"><div class="k">Pro</div><h3><span class="tr">Kontrol sende</span><span class="en">You're in control</span></h3><p><span class="tr">Pozlama, beyaz dengesi, renk profilleri ve canlı histogram. Telefon izin veriyorsa ISO, enstantane ve elle odak.</span><span class="en">Exposure, white balance, color profiles and a live histogram. ISO, shutter and manual focus where your phone allows.</span></p></div>
+        <div class="mode"><div class="k">Panorama</div><h3><span class="tr">Geniş manzaralar</span><span class="en">Wide views</span></h3><p><span class="tr">Jiroskop yön gösterir, kareler otomatik birleştirilir.</span><span class="en">The gyroscope guides you and frames are stitched automatically.</span></p></div>
+        <div class="mode"><div class="k">Video</div><h3><span class="tr">4K'ya kadar</span><span class="en">Up to 4K</span></h3><p><span class="tr">Telefonun desteklediği çözünürlükte, H.264 veya H.265.</span><span class="en">At the resolutions your phone supports, H.264 or H.265.</span></p></div>
+        <div class="mode"><div class="k"><span class="tr">Hızlandırılmış</span><span class="en">Time-lapse</span></div><h3><span class="tr">Saatleri saniyelere sığdır</span><span class="en">Hours in seconds</span></h3><p><span class="tr">0,5 ile 30 saniye arası çekim aralığı.</span><span class="en">Capture intervals from 0.5 to 30 seconds.</span></p></div>
+      </div>
+      <ul class="extras">
+        <li><span class="tr">0.6x · 1x · 2x geçişi</span><span class="en">0.6x · 1x · 2x switching</span></li>
+        <li><span class="tr">Dokunarak odak</span><span class="en">Tap to focus</span></li>
+        <li><span class="tr">Uzun bas: AF/AE kilidi</span><span class="en">Long-press AF/AE lock</span></li>
+        <li><span class="tr">Izgara: 3x3, kare, altın oran</span><span class="en">Grid: 3x3, square, golden ratio</span></li>
+        <li><span class="tr">Zamanlayıcı 3/10 sn</span><span class="en">Timer 3/10 s</span></li>
+        <li><span class="tr">Ses tuşuyla çekim</span><span class="en">Volume-key shutter</span></li>
+        <li><span class="tr">RAW (DNG), destekleyen telefonlarda</span><span class="en">RAW (DNG) on supported phones</span></li>
+        <li><span class="tr">Sahne algılama</span><span class="en">Scene detection</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="gizlilik">
+    <div class="wrap privacy">
+      <div>
+        <div class="eyebrow"><span class="tr">Gizlilik</span><span class="en">Privacy</span></div>
+        <h2><span class="tr">Fotoğrafların telefonundan çıkmaz.</span><span class="en">Your photos stay on your phone.</span></h2>
+        <p class="intro"><span class="tr">Pixora'nın internete bağlanma izni yok. Yapay zekâ işlemleri cihazda yapılır. Sağdaki liste, uygulamanın istediği izinlerin tamamıdır.</span><span class="en">Pixora has no permission to connect to the internet. AI processing runs on the device. The list on the right is every permission the app asks for.</span></p>
+      </div>
+      <div class="tablewrap">
+        <table class="perm">
+          <thead><tr><th><span class="tr">İzin</span><span class="en">Permission</span></th><th><span class="tr">Neden</span><span class="en">Why</span></th><th><span class="tr">Durum</span><span class="en">Status</span></th></tr></thead>
+          <tbody>
+            <tr><td><code>CAMERA</code></td><td class="why"><span class="tr">Fotoğraf ve video çekmek için</span><span class="en">To take photos and videos</span></td><td><span class="pill yes"><span class="tr">gerekli</span><span class="en">required</span></span></td></tr>
+            <tr><td><code>RECORD_AUDIO</code></td><td class="why"><span class="tr">Videoda ses; ilk video kaydında sorulur</span><span class="en">Sound in videos; asked on first recording</span></td><td><span class="pill opt"><span class="tr">isteğe bağlı</span><span class="en">optional</span></span></td></tr>
+            <tr><td><code>ACCESS_FINE_LOCATION</code></td><td class="why"><span class="tr">Konum etiketi; Ayarlar'da açarsan</span><span class="en">Location tag; only if you turn it on</span></td><td><span class="pill opt"><span class="tr">varsayılan kapalı</span><span class="en">off by default</span></span></td></tr>
+            <tr><td><code>INTERNET</code></td><td class="why"><span class="tr">İstenmiyor</span><span class="en">Not requested</span></td><td><span class="pill no"><span class="tr">yok</span><span class="en">none</span></span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="uyumluluk">
+    <div class="wrap">
+      <div class="eyebrow"><span class="tr">Uyumluluk</span><span class="en">Compatibility</span></div>
+      <h2><span class="tr">Telefonuna uyum sağlar.</span><span class="en">It adapts to your phone.</span></h2>
+      <div class="compat">
+        <div><div class="big">Android 9+</div><p><span class="tr">Camera2 destekli telefonlarda çalışır.</span><span class="en">Runs on phones with Camera2 support.</span></p></div>
+        <div><div class="big"><span class="tr">Akıllı</span><span class="en">Smart</span></div><p><span class="tr">RAW, 60 FPS, video sabitleme, elle ISO gibi özellikler telefonun donanımı izin veriyorsa açılır; vermiyorsa gizlenir.</span><span class="en">RAW, 60 FPS, stabilization and manual ISO switch on when your phone's hardware allows them and stay hidden when it doesn't.</span></p></div>
+        <div><div class="big"><span class="tr">Açık kaynak</span><span class="en">Open source</span></div><p><span class="tr">Kodun tamamı GitHub'da. İncele, katkı ver.</span><span class="en">All the code is on GitHub. Read it, contribute.</span></p></div>
+      </div>
+      <p class="intro en" style="margin-top:32px">The app interface is currently in Turkish. English is on the way.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap bar">
+    <span>Pixora · <span class="tr">Android için kamera</span><span class="en">Camera for Android</span></span>
+    <a class="ghost" href="https://github.com/Marque-source/A56CameraApp">github.com/Marque-source/A56CameraApp</a>
+  </div>
+</footer>
+</div>
+
+<script>
+(function () {
+  // Dil seçimi
+  var page = document.getElementById('page');
+  function setLang(l) {
+    page.setAttribute('data-l', l);
+    document.documentElement.lang = l;
+    document.getElementById('btn-tr').setAttribute('aria-pressed', l === 'tr');
+    document.getElementById('btn-en').setAttribute('aria-pressed', l === 'en');
+    try { localStorage.setItem('pixora-lang', l); } catch (e) {}
+  }
+  var start = 'tr';
+  try { start = localStorage.getItem('pixora-lang') || start; } catch (e) {}
+  if (location.hash === '#en') start = 'en';
+  if (location.hash === '#tr') start = 'tr';
+  setLang(start);
+  document.querySelectorAll('.lang button').forEach(function (b) {
+    b.addEventListener('click', function () { setLang(b.getAttribute('data-set')); });
+  });
+
+  // Gece sahnesi benzetimi: aynı sahne, 1 kare gürültü vs 5 kare ortalaması (gürültü / √5)
+  var before = document.getElementById('before'), after = document.getElementById('after');
+  function rng(seed) { return function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+  function gauss(r) { var u = r() || 1e-9, v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.2832 * v); }
+
+  function scene(w, h) {
+    var c = document.createElement('canvas'); c.width = w; c.height = h;
+    var g = c.getContext('2d');
+    var sky = g.createLinearGradient(0, 0, 0, h);
+    sky.addColorStop(0, '#0b0b2a'); sky.addColorStop(0.55, '#24184f'); sky.addColorStop(0.78, '#5a2f5e'); sky.addColorStop(1, '#1a0f1f');
+    g.fillStyle = sky; g.fillRect(0, 0, w, h);
+    var r = rng(7);
+    for (var i = 0; i < 90; i++) { g.fillStyle = 'rgba(255,255,255,' + (0.3 + r() * 0.6) + ')'; g.fillRect(r() * w, r() * h * 0.45, 1.2, 1.2); }
+    g.fillStyle = '#ffe9c9'; g.beginPath(); g.arc(w * 0.76, h * 0.17, w * 0.06, 0, 6.2832); g.fill();
+    var glow = g.createRadialGradient(w * 0.76, h * 0.17, 0, w * 0.76, h * 0.17, w * 0.22);
+    glow.addColorStop(0, 'rgba(255,200,150,.35)'); glow.addColorStop(1, 'rgba(255,200,150,0)');
+    g.fillStyle = glow; g.fillRect(0, 0, w, h);
+    // Şehir silueti ve pencereler
+    var x = 0, base = h * 0.72;
+    while (x < w) {
+      var bw = w * (0.06 + r() * 0.09), bh = h * (0.12 + r() * 0.3);
+      g.fillStyle = '#120c26'; g.fillRect(x, base - bh, bw, h - base + bh);
+      for (var wy = base - bh + 8; wy < base - 6; wy += 11) for (var wx = x + 5; wx < x + bw - 6; wx += 9)
+        if (r() < 0.32) { g.fillStyle = r() < 0.7 ? '#ffc979' : '#9fd3ff'; g.fillRect(wx, wy, 4, 5); }
+      x += bw + 2;
+    }
+    // Nehir yansımaları
+    g.fillStyle = '#0d0a1c'; g.fillRect(0, base, w, h - base);
+    for (var k = 0; k < 60; k++) { g.fillStyle = 'rgba(255,190,120,' + (0.08 + r() * 0.25) + ')'; g.fillRect(r() * w, base + 6 + r() * (h - base - 10), 6 + r() * 26, 1.5); }
+    return g.getImageData(0, 0, w, h);
+  }
+
+  function render() {
+    var rect = before.parentElement.getBoundingClientRect();
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = Math.max(200, Math.round(rect.width * dpr)), h = Math.max(240, Math.round(rect.height * dpr));
+    var s = Math.max(1, Math.round(w / 520));          // gürültü tanesi için ölçek
+    var sw = Math.ceil(w / s), sh = Math.ceil(h / s);
+    var base = scene(sw, sh), d = base.data;
+    function noisy(frames, seed) {
+      var out = new ImageData(sw, sh), o = out.data, r = rng(seed);
+      // 5 kare: ortalama gürültüyü √5 azaltır, ardından gürültü azaltma (masaüstü ölçümünde toplam ~4 kat)
+      var sigma = frames > 1 ? 34 / 4 : 34, dim = 0.55, lift = frames > 1 ? 1.55 : 1.0;
+      for (var i = 0; i < d.length; i += 4) {
+        var n = gauss(r) * sigma, cn = gauss(r) * sigma * 0.6;
+        for (var c = 0; c < 3; c++) {
+          var v = d[i + c] * dim + n + (c === 0 ? cn : c === 2 ? -cn : 0);
+          v = Math.pow(Math.max(0, v) / 255, 1 / lift) * 255;
+          o[i + c] = v < 0 ? 0 : v > 255 ? 255 : v;
+        }
+        o[i + 3] = 255;
+      }
+      return out;
+    }
+    [[before, 1, 11], [after, 5, 29]].forEach(function (p) {
+      var cv = p[0]; cv.width = sw; cv.height = sh;
+      cv.getContext('2d').putImageData(noisy(p[1], p[2]), 0, 0);
+      cv.style.imageRendering = s > 1 ? 'pixelated' : 'auto';
+    });
+  }
+  render();
+  var t; window.addEventListener('resize', function () { clearTimeout(t); t = setTimeout(render, 200); });
+
+  // Sürükleme
+  var frame = document.getElementById('frame'), input = document.getElementById('split'), drag = false;
+  function setSplit(p) { p = Math.max(5, Math.min(95, p)); frame.style.setProperty('--split', p + '%'); input.value = Math.round(p); }
+  function fromEvent(e) { var r = frame.getBoundingClientRect(); setSplit((e.clientX - r.left) / r.width * 100); }
+  frame.addEventListener('pointerdown', function (e) { drag = true; frame.setPointerCapture(e.pointerId); fromEvent(e); });
+  frame.addEventListener('pointermove', function (e) { if (drag) fromEvent(e); });
+  frame.addEventListener('pointerup', function () { drag = false; });
+  frame.addEventListener('pointercancel', function () { drag = false; });
+  input.addEventListener('input', function () { setSplit(+input.value); });
+  frame.tabIndex = 0;
+  frame.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') { setSplit(+input.value - 5); e.preventDefault(); }
+    if (e.key === 'ArrowRight') { setSplit(+input.value + 5); e.preventDefault(); }
+  });
+})();
+</script>
+
+</body>
+</html>

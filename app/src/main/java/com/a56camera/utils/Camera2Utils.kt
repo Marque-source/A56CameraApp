@@ -7,7 +7,6 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraExtensionCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
-import android.hardware.camera2.params.RggbChannelVector
 import android.hardware.camera2.params.StreamConfigurationMap
 import android.os.Build
 import android.util.Log
@@ -250,39 +249,55 @@ object Camera2Utils {
         return (ln(nanos / lo) / ln(hi / lo)).toFloat().coerceIn(0f, 1f)
     }
 
-    fun kelvinToRggb(kelvin: Int): RggbChannelVector {
-        val temp = kelvin / 100.0
-        val red: Double
-        val green: Double
-        val blue: Double
+    /**
+     * Ekrandaki dokunma noktasını sensör (aktif dizi) koordinatına çevirir.
+     *
+     * Eskiden ekran x/y doğrudan sensör x/y kabul ediliyordu. Ama sensör yatay, ekran dikey:
+     * arka kamerada (yön 90°) ekranın ÜSTÜ sensörün SOL kenarıdır. Ayrıca önizlemenin ekranda
+     * kapladığı alan (letterbox), ön kameranın ayna görüntüsü ve zoom hesaba katılmıyordu.
+     *
+     * @param x,y dokunma noktası (görünüm pikselleri)
+     * @param content önizleme görüntüsünün görünüm içinde kapladığı dikdörtgen
+     * @param sensorOrientation SENSOR_ORIENTATION (0/90/180/270)
+     * @param mirrored ön kamera (önizleme aynalanmış)
+     * @param activeArray SENSOR_INFO_ACTIVE_ARRAY_SIZE
+     * @param zoomRatio CONTROL_ZOOM_RATIO (1 = zoom yok)
+     * @param streamAspect önizleme akışının en/boy oranı (yatay, ör. 4:3 = 1.333, 16:9 = 1.777)
+     */
+    fun mapViewToSensor(
+        x: Float, y: Float,
+        content: android.graphics.RectF,
+        sensorOrientation: Int,
+        mirrored: Boolean,
+        activeArray: Rect,
+        zoomRatio: Float,
+        streamAspect: Float
+    ): Point {
+        // 1) Görüntü alanına göre 0..1
+        var u = ((x - content.left) / content.width()).coerceIn(0f, 1f)
+        val v = ((y - content.top) / content.height()).coerceIn(0f, 1f)
+        if (mirrored) u = 1f - u
 
-        red = if (temp <= 66) 255.0 else (329.698727446 * (temp - 60).pow(-0.1332047592)).coerceIn(0.0, 255.0)
-        green = if (temp <= 66)
-            (99.4708025861 * ln(temp) - 161.1195681661).coerceIn(0.0, 255.0)
-        else
-            (288.1221695283 * (temp - 60).pow(-0.0755148492)).coerceIn(0.0, 255.0)
-        blue = when {
-            temp >= 66 -> 255.0
-            temp <= 19 -> 0.0
-            else -> (138.5177312231 * ln(temp - 10) - 305.0447927307).coerceIn(0.0, 255.0)
+        // 2) Ekran yönünden sensör yönüne (sensör görüntüsü saat yönünde [sensorOrientation] döndürülerek gösterilir)
+        val (sx, sy) = when (((sensorOrientation % 360) + 360) % 360) {
+            90 -> v to (1f - u)
+            180 -> (1f - u) to (1f - v)
+            270 -> (1f - v) to u
+            else -> u to v
         }
 
-        val rGain = (255.0 / max(1.0, red)).toFloat().coerceIn(1.0f, 4.0f)
-        val gGain = 1.0f
-        val bGain = (255.0 / max(1.0, blue)).toFloat().coerceIn(1.0f, 4.0f)
-        return RggbChannelVector(rGain, gGain, gGain, bGain)
-    }
+        // 3) Zoom ve akış en/boy oranı: önizleme sensörün ortadaki bir bölümünü gösterir
+        val r = zoomRatio.coerceAtLeast(1f)
+        var visW = activeArray.width() / r
+        var visH = activeArray.height() / r
+        val arrayAspect = visW / visH
+        if (streamAspect > arrayAspect) visH = visW / streamAspect   // ör. 16:9 akış, 4:3 sensör: üst-alt kırpılır
+        else if (streamAspect < arrayAspect) visW = visH * streamAspect
+        val left = activeArray.left + (activeArray.width() - visW) / 2f
+        val top = activeArray.top + (activeArray.height() - visH) / 2f
 
-    fun mapPreviewToSensor(
-        x: Float, y: Float,
-        previewWidth: Int, previewHeight: Int,
-        activeArray: Rect,
-        cropRegion: Rect?
-    ): Point {
-        val region = cropRegion ?: activeArray
-        val sx = (x / previewWidth) * region.width() + region.left
-        val sy = (y / previewHeight) * region.height() + region.top
-        return Point(sx.toInt().coerceIn(activeArray.left, activeArray.right),
-            sy.toInt().coerceIn(activeArray.top, activeArray.bottom))
+        val px = (left + sx * visW).toInt().coerceIn(activeArray.left, activeArray.right - 1)
+        val py = (top + sy * visH).toInt().coerceIn(activeArray.top, activeArray.bottom - 1)
+        return Point(px, py)
     }
 }

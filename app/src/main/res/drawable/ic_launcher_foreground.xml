@@ -1,43 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Pixora simgesi: "P" harfi + objektif, merkezde ışık parıltısı -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Camera Body -->
-    <path
-        android:fillColor="#1E1E1E"
-        android:pathData="M32,32 L40,24 L68,24 L76,32 L84,32 C88.4,32 92,35.6 92,40 L92,72 C92,76.4 88.4,80 84,80 L24,80 C19.6,80 16,76.4 16,72 L16,40 C16,35.6 19.6,32 24,32 Z" />
-
-    <!-- Outer Lens Ring (Google Blue) -->
-    <path
-        android:fillColor="#4285F4"
-        android:pathData="M54,36 A20,20 0 1,0 54,76 A20,20 0 1,0 54,36 Z" />
-
-    <!-- Inner Ring Accent (Google Red/Yellow/Green Arc) -->
-    <path
-        android:fillColor="#EA4335"
-        android:pathData="M54,40 A16,16 0 0,1 70,56 L64,56 A10,10 0 0,0 54,46 Z" />
-    <path
-        android:fillColor="#34A853"
-        android:pathData="M54,72 A16,16 0 0,1 38,56 L44,56 A10,10 0 0,0 54,66 Z" />
-    <path
-        android:fillColor="#FBBC05"
-        android:pathData="M38,56 A16,16 0 0,1 54,40 L54,46 A10,10 0 0,0 44,56 Z" />
-
-    <!-- Lens Center Aperture / Reflection -->
-    <path
-        android:fillColor="#121212"
-        android:pathData="M54,44 A12,12 0 1,0 54,68 A12,12 0 1,0 54,44 Z" />
-
-    <!-- Glass Flare -->
-    <path
-        android:fillColor="#80FFFFFF"
-        android:pathData="M58,48 A4,4 0 1,0 58,56 A4,4 0 1,0 58,48 Z" />
-
-    <!-- Flash Light -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M78,40 A3,3 0 1,0 78,46 A3,3 0 1,0 78,40 Z" />
+        android:pathData="M35,35 a5,5 0 0 1 5,-5 h7 v43 a5,5 0 0 1 -5,5 h-2 a5,5 0 0 1 -5,-5 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M58,30 a19,19 0 1 1 0,38 a19,19 0 1 1 0,-38 Z M58,39 a10,10 0 1 0 0,20 a10,10 0 1 0 0,-20 Z" />
+    <path
+        android:fillColor="#FFC9A3"
+        android:pathData="M58,43 l1.5,4.5 4.5,1.5 -4.5,1.5 -1.5,4.5 -1.5,-4.5 -4.5,-1.5 4.5,-1.5 Z" />
 </vector>

@@ -24,6 +24,11 @@ object ToneMapHelper {
 
     private const val TAG = "ToneMapHelper"
 
+    /** Gece CLAHE kırpma sınırı (eskiden 3.0). */
+    const val NIGHT_CLAHE_CLIP = 1.2
+    /** Gece parlatma eğrisi üssü (eskiden 0.72); CLAHE azalınca kaybolan parlaklığı telafi eder. */
+    const val NIGHT_GAMMA = 0.62
+
     /** Önceden tanımlanmış renk profilleri */
     enum class ColorProfile(
         val gamma: Float,
@@ -38,7 +43,7 @@ object ToneMapHelper {
         PIXEL_NATURAL(
             gamma = 0.92f, contrast = 1.10f, saturation = 1.02f,
             warmth = 0.000f, shadowLift = 0.015f, highlightRoll = 0.96f,
-            displayNameTr = "Google Pixel Doğal"
+            displayNameTr = "Pixora Doğal"
         ),
         /** Leica Monokrom (True B&W) — Kadifemsi ton geçişli, yüksek dinamik aralıklı analog siyah-beyaz */
         PRO_MONOCHROME(
@@ -179,11 +184,8 @@ object ToneMapHelper {
         Imgproc.cvtColor(lab, bgr, Imgproc.COLOR_Lab2BGR)
         lab.release()
         planes.forEach { it.release() }
-
-        // 2. Halo-free Micro-contrast (Pixel doku keskinliği)
-        val sharpened = applyAdaptiveAcutance(bgr, strength = 0.28, haloThreshold = 20.0)
-        sharpened.copyTo(bgr)
-        sharpened.release()
+        // Not: Burada ayrıca keskinleştirme yapılmıyor. Çağıran taraf (pipeline / tryFinishCapture)
+        // zaten applyAdaptiveAcutance uyguluyor; iki kez keskinleştirmek gürültüyü de iki kez büyütüyordu.
     }
 
     /**
@@ -210,10 +212,10 @@ object ToneMapHelper {
         val meanL = Core.mean(lChannel).`val`[0]
         Log.i(TAG, "📊 [L-Giriş] meanL=%.2f, minL=%.1f, maxL=%.1f".format(meanL, initialStats.minVal, initialStats.maxVal))
 
-        // 2. Lokal Ton Haritalama (Smooth Local Tone Mapping via 12x12 CLAHE):
-        // Zifiri karanlık ağaç ve binalardaki gizli dokuları yumuşakça açar;
-        // Sokak lambası ve sahadaki aşırı patlamış ışığı dengeler.
-        val clahe = Imgproc.createCLAHE(3.0, Size(12.0, 12.0))
+        // 2. Lokal Ton Haritalama (12x12 CLAHE):
+        // Kırpma sınırı 3.0 iken düz karanlık alanlarda gürültüyü 3.5 kat büyütüyor, sinyal/gürültü
+        // oranını yarıya indiriyordu. 1.2 hafif yerel kontrast verir; parlatmayı aşağıdaki eğri yapar.
+        val clahe = Imgproc.createCLAHE(NIGHT_CLAHE_CLIP, Size(12.0, 12.0))
         clahe.apply(lChannel, lChannel)
 
         // 3. Shadow Lift Curve, Sky Black Anchor & Highlight Soft-Knee:
@@ -224,7 +226,7 @@ object ToneMapHelper {
 
             // A. Gölge Kaldırma (Google Night Sight & Apple Photonic Luma Eğrisi):
             // norm^0.72 sayesinde karanlıkta kalan ağaç, bina ve arabalar görünür hale gelir.
-            var v = Math.pow(norm, 0.72)
+            var v = Math.pow(norm, NIGHT_GAMMA)
 
             // B. Kadife Gökyüzü Sabitleyici (Sadece gerçek gece gökyüzü < 0.035 için siyahı kilitler, ağaçları ezmez!)
             if (norm < 0.035) {
@@ -540,7 +542,8 @@ object ToneMapHelper {
     fun applyAdaptiveAcutance(
         src: Mat,
         strength: Double = 0.38,
-        haloThreshold: Double = 24.0
+        haloThreshold: Double = 24.0,
+        noiseFloor: Double = 3.0
     ): Mat {
         // 4080x3060 (12.5 MP) piksel sıklığında gerçek optik doku sınırlarını yakalamak için 1.15 sigma
         val blurred = Mat()
@@ -556,6 +559,22 @@ object ToneMapHelper {
         val delta = Mat()
         Core.subtract(srcFloat, blurFloat, delta)
         blurFloat.release()
+
+        // Gürültü eşiği (coring): |delta| < noiseFloor olan küçük farklar gürültüdür, keskinleştirilmez;
+        // daha büyük farklardan noiseFloor kadarı düşülür. Eşik yokken her gürültü tanesi de büyütülüyordu.
+        if (noiseFloor > 0.0) {
+            val absDelta = Mat()
+            Core.absdiff(delta, Scalar(0.0, 0.0, 0.0), absDelta)
+            val shrunk = Mat()
+            Core.subtract(absDelta, Scalar(noiseFloor, noiseFloor, noiseFloor), shrunk)
+            Core.max(shrunk, Scalar(0.0, 0.0, 0.0), shrunk)
+            // delta = sign(delta) * max(|delta| - floor, 0)  ->  delta * shrunk / |delta|
+            val safeAbs = Mat()
+            Core.max(absDelta, Scalar(1e-6, 1e-6, 1e-6), safeAbs)
+            Core.divide(delta, safeAbs, delta)
+            Core.multiply(delta, shrunk, delta)
+            listOf(absDelta, shrunk, safeAbs).forEach { it.release() }
+        }
 
         // Halo bastırma: Yüksek kontrastlı sınırlarda delta'yı [-threshold, +threshold] ile sınırla (clamping)
         val clampedDelta = Mat()

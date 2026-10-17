@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
-import android.hardware.camera2.params.ExtensionSessionConfiguration
 import android.hardware.camera2.params.OutputConfiguration
 import android.location.Location
 import android.media.Image
@@ -43,15 +42,22 @@ class PendingCaptureRequest(
     val colorProfile: com.a56camera.pipeline.ToneMapHelper.ColorProfile? = null,
     val isProMode: Boolean = false,
     val onProSaved: ((Uri, String) -> Unit)? = null,
+    /** Bu çekimde RAW_SENSOR karesi de istendi mi (gerçek DNG için)? */
+    val expectsRaw: Boolean = false,
+    /** DngCreator için çekimin yapıldığı kameranın karakteristikleri. */
+    val characteristics: CameraCharacteristics? = null,
     val createTime: Long = System.currentTimeMillis()
 ) {
     @Volatile var captureResult: TotalCaptureResult? = null
     @Volatile var jpegBytes: ByteArray? = null
+    /** RAW_SENSOR karesi; DNG yazıldıktan sonra kapatılır. */
+    @Volatile var rawImage: Image? = null
     private val completed = AtomicBoolean(false)
 
-    /** İki parça da hazırsa true döner (sadece bir kez). */
+    /** Gerekli tüm parçalar (metadata + JPEG + varsa RAW) hazırsa true döner (sadece bir kez). */
     fun tryComplete(): Boolean {
-        return captureResult != null && jpegBytes != null && !completed.getAndSet(true)
+        val rawReady = !expectsRaw || rawImage != null
+        return captureResult != null && jpegBytes != null && rawReady && !completed.getAndSet(true)
     }
 
     fun isCompleted(): Boolean = completed.get()
@@ -62,6 +68,7 @@ class Camera2Manager(
     private val previewView: Camera2PreviewView
 ) {
     private val TAG = "Camera2Manager"
+    private val CONVERGENCE_TIMEOUT_MS = 1200L
     private val systemManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     private var bgThread: HandlerThread? = null
@@ -77,8 +84,23 @@ class Camera2Manager(
     private var imageReaders: ImageReaderManager? = null
     private var sessionManager: CaptureSessionManager? = null
 
-    private val multiFrameProcessor = com.a56camera.pipeline.MultiFrameProcessor()
-    private val smartDenoiser = com.a56camera.pipeline.SmartDenoiser()
+    /**
+     * Ağır görüntü işleme (birleştirme, gürültü azaltma, yapay zeka modelleri, JPEG kodlama) için
+     * uygulama ömrü boyunca yaşayan ayrı iş parçacığı. Eskiden bunlar kamera iş parçacığında
+     * çalışıyor ve işlem sürerken kamera geri çağrılarını bekletiyordu. TFLite GPU delegesi
+     * oluşturulduğu iş parçacığında kullanılmak zorunda olduğu için modeller hep burada yüklenir.
+     */
+    private val procThread = HandlerThread("A56Process").also { it.start() }
+    private val procHandler = Handler(procThread.looper)
+    private var modelsWarmedUp = false
+    private val sceneAnalysisBusy = AtomicBoolean(false)
+    private val burstInProgress = AtomicBoolean(false)
+
+    /** Video/time-lapse kaydı sürerken kayıt yüzeyi; tekrarlayan istekler bunu da hedeflemeli. */
+    private var recordingSurface: Surface? = null
+    private var recordingFps: Int = 30
+    private var recordingStabilization: Boolean = false
+    private val focusResetToken = Any()
 
     private var cameras: List<Camera2Utils.CameraInfo> = emptyList()
     var currentFacing: Camera2Utils.Facing = Camera2Utils.Facing.BACK
@@ -128,32 +150,55 @@ class Camera2Manager(
         }
     }
 
-    private var extensionSession: CameraExtensionSession? = null
 
+    /**
+     * Expert RAW: açıkken oturuma gerçek RAW_SENSOR akışı eklenir ve fotoğraf çekimlerinde
+     * JPEG'in yanında DngCreator ile sensör verisinden DNG yazılır.
+     * Değişince oturum yeniden kurulur (RAW yüzeyi oturum yapılandırmasının parçası).
+     */
     var rawEnabled: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                restartSessionForAspectOrRes()
+            }
+        }
+
+    /** RAW akışı denenip oturum kurulamadıysa true — aynı kamerada tekrar denenmez. */
+    private var rawStreamUnsupported = false
 
     var onPreviewResult: ((TotalCaptureResult) -> Unit)? = null
-    var onYuvImage: ((Image) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    /** Kamera her açıldığında (lens/ön-arka değişiminde de) çağrılır; arayüz yeteneklere göre güncellenir. */
+    var onCameraOpened: (() -> Unit)? = null
     var onSceneDetected: ((com.a56camera.pipeline.SceneOptimizer.DetectionResult) -> Unit)? = null
 
-    private lateinit var pipeline: com.a56camera.pipeline.ImageProcessingPipeline
-    private val zslRingBuffer = com.a56camera.pipeline.ZslRingBuffer(capacity = 8)
-    private val sceneOptimizer by lazy { com.a56camera.pipeline.SceneOptimizer(context) }
+    /** Tek bir işleme hattı (ve tek set TFLite modeli) uygulama ömrü boyunca kullanılır. */
+    private val pipeline by lazy { com.a56camera.pipeline.ImageProcessingPipeline(context) }
     private var lastSceneAnalysisTimestamp = 0L
 
+    /** Kamerayı açar. Birden çok kez çağrılırsa (onResume vb.) modeller yeniden yüklenmez. */
     fun start() {
         startBackgroundThread()
-        pipeline = com.a56camera.pipeline.ImageProcessingPipeline(context)
         if (!pipeline.initOpenCV()) {
             onError?.invoke("OpenCV başlatılamadı")
             return
         }
-        Thread {
-            pipeline.tfliteEngine.prewarmModels()
-        }.start()
+        if (!modelsWarmedUp) {
+            modelsWarmedUp = true
+            procHandler.post { pipeline.tfliteEngine.prewarmModels() }
+        }
         cameras = Camera2Utils.enumerateCameras(systemManager)
         openForFacing(currentFacing)
+    }
+
+    /** Aktivite yok edilirken: kamerayı kapat, modelleri serbest bırak, işleme thread'ini bitir. */
+    fun destroy() {
+        release()
+        procHandler.post {
+            try { pipeline.tfliteEngine.release() } catch (_: Throwable) {}
+        }
+        procThread.quitSafely()
     }
 
     private fun startBackgroundThread() {
@@ -189,16 +234,20 @@ class Camera2Manager(
         isCameraClosing.set(false)
         currentInfo = info
         currentFacing = info.facing
+        rawStreamUnsupported = false
         val ch = systemManager.getCameraCharacteristics(info.id)
         characteristics = ch
-        com.a56camera.utils.SamsungVendorTagsExplorer.dumpCameraVendorTags(ch, info.id)
+        if (com.a56camera.BuildConfig.DEBUG) {
+            com.a56camera.utils.SamsungVendorTagsExplorer.dumpCameraVendorTags(ch, info.id)
+        }
         exposure.readRanges(ch)
+        whiteBalance.readCharacteristics(ch)
         focus.readCharacteristics(ch)
         zoom.readCharacteristics(ch)
         zoom.setZoom(initialZoom)
         chooseSizes(ch)
 
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+        if (com.a56camera.BuildConfig.DEBUG && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             Camera2Utils.checkCamera2Extensions(systemManager, info.id)
         }
 
@@ -211,6 +260,7 @@ class Camera2Manager(
                     }
                     cameraDevice = device
                     createPreviewSession()
+                    onCameraOpened?.invoke()
                 }
 
                 override fun onDisconnected(device: CameraDevice) {
@@ -247,15 +297,17 @@ class Camera2Manager(
         previewView.setBufferSize(previewSize, orientation)
     }
 
-    fun setExtensionForMode(mode: CaptureMode, hdr: HdrMode) {
-        // A56 üzerinde yazılımsal YUV pipeline aktif
-    }
 
     fun createPreviewSession() {
         createStandardPreviewSession()
     }
 
     private fun createStandardPreviewSession() {
+        val wantRaw = rawEnabled && currentInfo?.supportsRaw == true && !rawStreamUnsupported
+        createStandardPreviewSession(withRaw = wantRaw)
+    }
+
+    private fun createStandardPreviewSession(withRaw: Boolean) {
         val device = cameraDevice ?: return
         val ch = characteristics ?: return
         val readers = imageReaders ?: return
@@ -264,6 +316,9 @@ class Camera2Manager(
         previewSurface = previewView.createSurface() ?: return
         readers.closeAll()
         readers.setupJpeg(ch, aspectRatio, isHighRes50Mp) { image -> onJpegAvailable(image) }
+        if (withRaw) {
+            readers.setupRaw(ch) { image -> onRawAvailable(image) }
+        }
 
         setupYuvBurstReader(ch)
 
@@ -271,7 +326,6 @@ class Camera2Manager(
             add(previewSurface!!)
             readers.jpegSurface()?.let { add(it) }
             readers.rawSurface()?.let { add(it) }
-            readers.yuvSurface()?.let { add(it) }
             yuvBurstSurface?.let { add(it) }
         }
 
@@ -282,6 +336,15 @@ class Camera2Manager(
             }
             override fun onFailed(reason: String) {
                 if (isCameraClosing.get()) return
+                if (withRaw) {
+                    // Bu akış kombinasyonu (önizleme + JPEG + RAW + YUV) cihazda desteklenmiyor:
+                    // RAW'sız tekrar dene ki kamera hiç açılmamış gibi kalmasın.
+                    Log.w(TAG, "RAW akışıyla oturum kurulamadı ($reason), RAW'sız yeniden deneniyor")
+                    rawStreamUnsupported = true
+                    mainPost { onError?.invoke("Bu kamerada RAW + işleme akışı birlikte açılamadı, RAW kapatıldı") }
+                    mainPost { createStandardPreviewSession(withRaw = false) }
+                    return
+                }
                 onError?.invoke(reason)
             }
         })
@@ -308,19 +371,76 @@ class Camera2Manager(
         yuvBurstSurface = yuvBurstReader!!.surface
     }
 
+    /**
+     * O anki duruma uygun tekrarlayan isteği kurar: normalde önizleme, kayıt sürerken
+     * önizleme + kayıt yüzeyi (RECORD şablonu). Eskiden zoom/odak/pozlama/flaş değişikliği
+     * her zaman yalnızca önizleme isteği gönderdiği için kayıt sırasında video donuyordu.
+     */
+    private fun buildRepeatingRequest(): CaptureRequest.Builder? {
+        val device = cameraDevice ?: return null
+        val ch = characteristics ?: return null
+        val rec = recordingSurface
+        return if (rec != null) {
+            val surfaces = listOfNotNull(previewSurface, rec)
+            requestBuilder.build(device, ch, CameraDevice.TEMPLATE_RECORD, surfaces, flashMode, forVideo = true)
+                ?.also { applyVideoSettings(it, ch) }
+        } else {
+            val readers = imageReaders ?: return null
+            val targets = buildList {
+                previewSurface?.let { add(it) }
+                readers.yuvSurface()?.let { add(it) }
+            }
+            requestBuilder.build(device, ch, CameraDevice.TEMPLATE_PREVIEW, targets, flashMode, forPreview = true)
+        }
+    }
+
     private fun startPreviewRepeating() {
         if (isCameraClosing.get()) return
-        val device = cameraDevice ?: return
-        val ch = characteristics ?: return
-        val readers = imageReaders ?: return
-        val targets = buildList {
-            previewSurface?.let { add(it) }
-            readers.yuvSurface()?.let { add(it) }
-        }
-        val builder = requestBuilder.build(
-            device, ch, CameraDevice.TEMPLATE_PREVIEW, targets, flashMode
-        ) ?: return
+        val builder = buildRepeatingRequest() ?: return
         sessionManager?.startRepeating(builder.build(), previewCallback)
+    }
+
+    /** Kayıt isteğine FPS aralığı ve (destekleniyorsa ve istenmişse) video sabitleme uygular. */
+    private fun applyVideoSettings(builder: CaptureRequest.Builder, ch: CameraCharacteristics) {
+        val ranges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        val target = ranges?.find { it.upper == recordingFps && it.lower == recordingFps }
+            ?: ranges?.find { it.upper == recordingFps }
+        target?.let { builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+        val stabModes = ch.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)
+        val wanted = if (recordingStabilization) CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                     else CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+        if (stabModes?.contains(wanted) == true) {
+            builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, wanted)
+        }
+    }
+
+    /**
+     * 12MP'den büyük (ör. 50MP) fotoğraf bu kamerada uygulamalara açık mı?
+     * Galaxy A56'da 50MP yalnızca Samsung'un kendi kamerasına açık; uygulamalar en fazla 4080x3060 alır.
+     */
+    fun supportsHighResPhoto(): Boolean {
+        val map = characteristics?.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+        val sizes = (map.getHighResolutionOutputSizes(ImageFormat.JPEG) ?: emptyArray()) +
+            (map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray())
+        return sizes.any { it.width.toLong() * it.height > 20_000_000L }
+    }
+
+    /** Video sabitleme (EIS) bu kamerada var mı? */
+    fun isVideoStabilizationSupported(): Boolean =
+        characteristics?.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)
+            ?.contains(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true
+
+    /** Kamera bu çözünürlük ve kare hızında video kaydedebiliyor mu? */
+    fun supportsVideo(width: Int, height: Int, fps: Int): Boolean {
+        val ch = characteristics ?: return false
+        val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+        val size = Size(width, height)
+        val sizes = map.getOutputSizes(android.media.MediaRecorder::class.java) ?: return false
+        if (sizes.none { it == size }) return false
+        val minFrameNs = try { map.getOutputMinFrameDuration(android.media.MediaRecorder::class.java, size) } catch (_: Exception) { 0L }
+        if (minFrameNs > 0 && minFrameNs > 1_000_000_000L / fps + 100_000L) return false
+        val ranges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: return false
+        return ranges.any { it.upper >= fps }
     }
 
     private val previewCallback = object : CameraCaptureSession.CaptureCallback() {
@@ -330,25 +450,35 @@ class Camera2Manager(
             result: TotalCaptureResult
         ) {
             lastResult = result
+            exposure.updateMetering(result)
             onPreviewResult?.invoke(result)
 
-            // AMD Xclipse 540 GPU Scene Optimizer & Özel Yerel ISP QR Taraması (her 450ms'de bir analiz)
+            // Sahne analizi (yaklaşık 2 kez/sn). Kayıt sırasında ve işleme thread'i meşgulken atlanır.
             val now = System.currentTimeMillis()
-            if (now - lastSceneAnalysisTimestamp > 450L) {
+            if (recordingSurface == null && now - lastSceneAnalysisTimestamp > 450L &&
+                !sceneAnalysisBusy.get()
+            ) {
                 lastSceneAnalysisTimestamp = now
+                sceneAnalysisBusy.set(true)
                 mainPost {
                     val thumbnail = try {
                         if (previewView.isAvailable) previewView.getBitmap(400, 400) else null
                     } catch (_: Throwable) { null }
-                    bgHandler?.post {
-                        if (thumbnail != null && !thumbnail.isRecycled) {
-                            // PINTO / Exynos 1580 NPU Canlı Sahne Analizi (MobileNetV2)
-                            val detection = sceneOptimizer.classifyScene(thumbnail, result)
-                            thumbnail.recycle()
-                            if (detection.confidence >= 0.50f && detection.scene != com.a56camera.pipeline.SceneOptimizer.SceneType.AUTO) {
-                                colorProfile = detection.scene.targetProfile
+                    if (thumbnail == null) { sceneAnalysisBusy.set(false); return@mainPost }
+                    procHandler.post {
+                        try {
+                            if (!thumbnail.isRecycled) {
+                                val detection = pipeline.tfliteEngine.sceneOptimizer.classifyScene(thumbnail, result)
+                                thumbnail.recycle()
+                                // Güvenli değilse varsayılana dön (eskiden son algılanan profil yapışık kalıyordu)
+                                colorProfile = if (detection.confidence >= 0.50f) detection.scene.targetProfile
+                                               else com.a56camera.pipeline.ToneMapHelper.ColorProfile.PIXEL_NATURAL
+                                mainPost { onSceneDetected?.invoke(detection) }
                             }
-                            mainPost { onSceneDetected?.invoke(detection) }
+                        } catch (e: Throwable) {
+                            Log.w(TAG, "Sahne analizi hatası", e)
+                        } finally {
+                            sceneAnalysisBusy.set(false)
                         }
                     }
                 }
@@ -369,12 +499,21 @@ class Camera2Manager(
         val jpegSurface = readers.jpegSurface() ?: return onErr()
 
         val orientation = jpegOrientation(ch, deviceRotation)
-        val pendingReq = PendingCaptureRequest(location, orientation, onSaved, onErr, colorProfile)
+        val rawSurface = if (rawEnabled) readers.rawSurface() else null
+        // Gece profili (güçlü gölge açma) çok kareli gece birleştirmesi içindir. Tek kare ISP JPEG'i zaten
+        // doğru pozlanmıştır; loş iç mekanda bu profil uygulanınca fotoğraf aşırı parlak ve kumlu çıkıyordu.
+        val photoProfile = if (colorProfile == com.a56camera.pipeline.ToneMapHelper.ColorProfile.NIGHT)
+            com.a56camera.pipeline.ToneMapHelper.ColorProfile.PIXEL_NATURAL else colorProfile
+        val pendingReq = PendingCaptureRequest(
+            location, orientation, onSaved, onErr, photoProfile,
+            expectsRaw = rawSurface != null,
+            characteristics = ch
+        )
         captureQueue.add(pendingReq)
 
         val builder = requestBuilder.build(
             device, ch, CameraDevice.TEMPLATE_STILL_CAPTURE,
-            listOf(jpegSurface), flashMode,
+            listOfNotNull(jpegSurface, rawSurface), flashMode,
             jpegOrientation = orientation, location = location
         ) ?: run {
             captureQueue.remove(pendingReq)
@@ -395,7 +534,7 @@ class Camera2Manager(
                 s: CameraCaptureSession, r: CaptureRequest,
                 failure: CaptureFailure
             ) {
-                captureQueue.remove(pendingReq)
+                discardRequest(pendingReq)
                 mainPost { onErr() }
             }
         })
@@ -429,6 +568,7 @@ class Camera2Manager(
         val jpegSurface = readers.jpegSurface() ?: return onError()
 
         val orientation = jpegOrientation(ch, deviceRotation)
+        val rawSurface = if (rawEnabled) readers.rawSurface() else null
         val pendingReq = PendingCaptureRequest(
             location = location,
             orientation = orientation,
@@ -436,7 +576,9 @@ class Camera2Manager(
             onError = onError,
             colorProfile = profile,
             isProMode = true,
-            onProSaved = onSaved
+            onProSaved = onSaved,
+            expectsRaw = rawSurface != null,
+            characteristics = ch
         )
         captureQueue.add(pendingReq)
 
@@ -450,6 +592,7 @@ class Camera2Manager(
         }
 
         builder.addTarget(jpegSurface)
+        rawSurface?.let { builder.addTarget(it) }
 
         // Manuel Pro Pozlama, Odak ve Beyaz Dengesi Korumalı Uygulama
         exposure.applyTo(builder)
@@ -478,156 +621,17 @@ class Camera2Manager(
                 tryFinishCapture(pendingReq)
             }
             override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
-                captureQueue.remove(pendingReq)
+                discardRequest(pendingReq)
                 mainPost { onError() }
             }
         })
     }
 
     /**
-     * Sıfır gecikmeli HDR çekim (ZSL - Zero Shutter Lag).
-     * Deklanşöre basıldığı an gecikme: 0ms!
-     * Tampondaki hazır en net kareleri anında kilitler ve işler.
-     */
-    fun captureZslHdr(
-        location: Location?,
-        deviceRotation: Int,
-        onProgress: ((String) -> Unit)? = null,
-        onSaved: (Uri) -> Unit,
-        onError: () -> Unit
-    ) {
-        val ch = characteristics ?: return onError()
-        val orientation = jpegOrientation(ch, deviceRotation)
-
-        zslRingBuffer.lockForCapture()
-        val zslFrames = zslRingBuffer.snapshotBestFrames(count = 5)
-
-        // Tampon henüz dolmadıysa normal HDR'a geç
-        if (zslFrames.size < 3) {
-            Log.d(TAG, "ZSL tamponu henüz hazır değil (${zslFrames.size} kare), normal HDR'a geçiliyor...")
-            zslRingBuffer.unlockAfterCapture()
-            captureHdr(location, deviceRotation, onProgress, onSaved, onError)
-            return
-        }
-
-        Log.d(TAG, "⚡ ZSL Tetiklendi: 0ms gecikmeyle ${zslFrames.size} kare alındı!")
-        onProgress?.invoke("Fotoğraf işleniyor...")
-
-        bgHandler?.post {
-            try {
-                val referenceResult = zslFrames[zslFrames.size / 2].second
-                val iso = referenceResult.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                val exposureNs = referenceResult.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-
-                val config = pipeline.autoConfig(iso, exposureNs).copy(
-                    colorProfile = colorProfile,
-                    superResolutionEnabled = zoom.currentRatio >= 1.8f,
-                    expertRawEnabled = rawEnabled,
-                    jpegQuality = 98,
-                    saveToGallery = true
-                )
-
-                val result = pipeline.process(
-                    frames = zslFrames,
-                    config = config,
-                    location = location,
-                    orientation = orientation,
-                    onProgress = { step -> mainPost { onProgress?.invoke(step) } }
-                )
-
-                mainPost {
-                    if (result.uri != null) {
-                        Log.d(TAG, "ZSL HDR tamamlandı: ${result.processingTimeMs}ms")
-                        onSaved(result.uri)
-                    } else {
-                        onError()
-                    }
-                    try { result.bitmap.recycle() } catch (_: Throwable) {}
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "ZSL pipeline hatası", e)
-                mainPost { onError() }
-            } finally {
-                zslRingBuffer.unlockAfterCapture()
-            }
-        }
-    }
-
-    /**
-     * HDR çekim: Bracketed burst -> multi-frame merge -> denoise -> kaydet.
-     */
-    fun captureHdr(
-        location: Location?,
-        deviceRotation: Int,
-        onProgress: ((String) -> Unit)? = null,
-        onSaved: (Uri) -> Unit,
-        onError: () -> Unit
-    ) {
-        val ch = characteristics ?: return onError()
-        val orientation = jpegOrientation(ch, deviceRotation)
-
-        val iso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-        val exposureNs = lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-        val isNight = iso > 800 || exposureNs > 33_000_000L
-
-        val frameCount = 3
-
-        onProgress?.invoke("Çekiliyor ($frameCount kare)...")
-
-        captureBracketedBurst(
-            frameCount = frameCount,
-            isNight = isNight,
-            onProgress = onProgress,
-            onComplete = { frames ->
-                bgHandler?.post {
-                    try {
-                        val config = pipeline.autoConfig(iso, exposureNs).copy(
-                            colorProfile = colorProfile,
-                            superResolutionEnabled = zoom.currentRatio >= 1.8f,
-                            expertRawEnabled = rawEnabled,
-                            jpegQuality = 98,
-                            saveToGallery = true
-                        )
-
-                        onProgress?.invoke("İşleniyor...")
-
-                        val result = pipeline.process(
-                            frames = frames,
-                            config = config,
-                            location = location,
-                            orientation = orientation,
-                            onProgress = { step -> mainPost { onProgress?.invoke(step) } }
-                        )
-
-                        mainPost {
-                            if (result.uri != null) {
-                                Log.d(TAG, "HDR çekim tamamlandı: ${result.processingTimeMs}ms, " +
-                                    "ISO=${result.iso}, ${result.frameCount} kare")
-                                onSaved(result.uri)
-                            } else {
-                                onError()
-                            }
-                            try { result.bitmap.recycle() } catch (_: Throwable) {}
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "HDR pipeline hatası", e)
-                        mainPost { onError() }
-                    }
-                }
-            },
-            onError = { msg ->
-                Log.e(TAG, "Burst hatası: $msg")
-                mainPost { onError() }
-            }
-        )
-    }
-
-    /**
      * Google Pixel Night Sight + Apple Photonic V2 Gece Modu:
-     * 1. 3 kare bracketed YUV burst (-1.0 EV, -0.4 EV, +0.4 EV): Sokak lambası patlamaz, sıfır çamur.
-     * 2. Samsung ISP kirlilikleri KAPALI (NOISE_REDUCTION_MODE_OFF): Balmumu yumuşatması yok, optik doku korunur.
-     * 3. Anında Vizör Serbestliği (DONE_CAPTURE): 250ms içinde arayüz açılır, kullanıcı yürümeye devam eder.
-     * 4. Arka Planda 4 TFLite Modeli + C++ Robust Merge: Zero-DCE, MiDaS doku maskesi, Smart Grain, Real-ESRGAN!
+     * 1. 5 kare AYNI pozlamayla YUV burst (gerekirse süre uzatılıp ISO düşürülür).
+     * 2. Kareler yakalanınca arayüz serbest kalır (DONE_CAPTURE); işleme ayrı iş parçacığında sürer.
+     * 3. Hizalama + hareket korumalı ortalama → gürültüye uyarlanan gürültü azaltma → gece tonu → keskinleştirme.
      */
     fun captureNight(
         location: Location?,
@@ -653,14 +657,13 @@ class Camera2Manager(
                 // Sensör foton toplamayı BİTİRDİ! Arayüz anında serbest kalır (ZSL hissi)
                 mainPost { onProgress?.invoke("DONE_CAPTURE") }
 
-                bgHandler?.post {
+                procHandler.post {
                     try {
                         val config = com.a56camera.pipeline.ImageProcessingPipeline.PipelineConfig(
                             colorProfile = com.a56camera.pipeline.ToneMapHelper.ColorProfile.NIGHT,
                             denoiseEnabled = true,
                             sharpenEnabled = true,
                             hdrEnabled = true,
-                            superResolutionEnabled = zoom.currentRatio >= 1.8f,
                             lowLightEnhanceEnabled = true,
                             expertRawEnabled = rawEnabled,
                             jpegQuality = 98,
@@ -720,7 +723,7 @@ class Camera2Manager(
             isNight = false,
             onProgress = { step -> mainPost { onProgress?.invoke(step) } },
             onComplete = { frames ->
-                bgHandler?.post {
+                procHandler.post {
                     try {
                         onProgress?.invoke("3D Derinlik Haritası (MiDaS NPU)...")
                         val config = com.a56camera.pipeline.ImageProcessingPipeline.PipelineConfig(
@@ -763,7 +766,13 @@ class Camera2Manager(
 
 
 
-    /** YUV_420_888 tabanlı Exposure Bracketed Burst çekimi yapar. */
+    /**
+     * YUV_420_888 tabanlı Exposure Bracketed Burst çekimi yapar.
+     *
+     * Çekimden önce otomatik pozlama ve beyaz dengesinin oturmasını (en fazla ~1,2 sn) bekler.
+     * A56 testinde mod değiştirdikten hemen sonra çekilen gece fotoğrafı, beyaz dengesi henüz
+     * oturmadığı için mor/pembe çıkıyordu; birkaç saniye sonraki çekim doğal renkteydi.
+     */
     fun captureBracketedBurst(
         frameCount: Int = 3,
         isNight: Boolean = false,
@@ -771,13 +780,55 @@ class Camera2Manager(
         onComplete: (List<Pair<YuvFrame, TotalCaptureResult>>) -> Unit,
         onError: (String) -> Unit
     ) {
+        val bg = bgHandler ?: return onError("Kamera hazır değil")
+        val start = android.os.SystemClock.uptimeMillis()
+        val check = object : Runnable {
+            override fun run() {
+                val waited = android.os.SystemClock.uptimeMillis() - start
+                if (isConverged(lastResult) || waited >= CONVERGENCE_TIMEOUT_MS) {
+                    if (waited >= CONVERGENCE_TIMEOUT_MS) Log.w(TAG, "AE/AWB oturmadan çekiliyor (${waited}ms)")
+                    captureBracketedBurstNow(frameCount, isNight, onProgress, onComplete, onError)
+                } else {
+                    bg.postDelayed(this, 40L)
+                }
+            }
+        }
+        bg.post(check)
+    }
+
+    /** Pozlama ve beyaz dengesi oturdu mu (ya da kilitli mi)? */
+    private fun isConverged(r: TotalCaptureResult?): Boolean {
+        r ?: return false
+        val ae = r.get(CaptureResult.CONTROL_AE_STATE)
+        val awb = r.get(CaptureResult.CONTROL_AWB_STATE)
+        val aeOk = ae == null || ae == CaptureResult.CONTROL_AE_STATE_CONVERGED ||
+            ae == CaptureResult.CONTROL_AE_STATE_LOCKED || ae == CaptureResult.CONTROL_AE_STATE_FLASH_REQUIRED
+        val awbOk = awb == null || awb == CaptureResult.CONTROL_AWB_STATE_CONVERGED ||
+            awb == CaptureResult.CONTROL_AWB_STATE_LOCKED
+        return aeOk && awbOk
+    }
+
+    private fun captureBracketedBurstNow(
+        frameCount: Int,
+        isNight: Boolean,
+        onProgress: ((String) -> Unit)?,
+        onComplete: (List<Pair<YuvFrame, TotalCaptureResult>>) -> Unit,
+        onError: (String) -> Unit
+    ) {
         if (isCameraClosing.get()) return onError("Kamera kapanıyor")
         val device = cameraDevice ?: return onError("Kamera cihazı hazır değil")
         val ch = characteristics ?: return onError("Karakteristikler bulunamadı")
         val yuvSurface = yuvBurstSurface ?: return onError("YUV burst yüzeyi hazır değil")
-
-        // RAM'i rahatlatmak için ZSL tamponunu temizle (100MB boş bellek aç)
-        zslRingBuffer.clear()
+        // Aynı anda ikinci bir burst başlatılırsa kareler iki çekim arasında karışıyordu
+        if (!burstInProgress.compareAndSet(false, true)) return onError("Önceki çekim sürüyor")
+        val userOnComplete = onComplete
+        val userOnError = onError
+        @Suppress("NAME_SHADOWING")
+        val onComplete: (List<Pair<YuvFrame, TotalCaptureResult>>) -> Unit = { frames ->
+            burstInProgress.set(false); userOnComplete(frames)
+        }
+        @Suppress("NAME_SHADOWING")
+        val onError: (String) -> Unit = { msg -> burstInProgress.set(false); userOnError(msg) }
 
         val bracket = lastResult?.let {
             ExposureBracketingStrategy.computeForScene(it, isNight)
@@ -800,11 +851,18 @@ class Camera2Manager(
 
         // 3.0 saniyelik zaman aşımı koruması (5 kare gece çekimi için ideal!)
         bgHandler?.postDelayed({
-            if (!completed.get() && collectedFrames.isNotEmpty()) {
+            if (completed.get()) return@postDelayed
+            if (collectedFrames.isNotEmpty()) {
                 Log.w(TAG, "Burst koruma zaman aşımı tetiklendi, ${collectedFrames.size} kare ile devam ediliyor")
                 checkBurstComplete(0, completed, collectedFrames, collectedMetadata, collectedResults, onComplete)
+            } else if (!completed.getAndSet(true)) {
+                // Hiç kare gelmedi: eskiden burada sonsuza kadar "işleniyor"da kalınıyordu
+                mainPost {
+                    yuvBurstFrameListener = null
+                    onError("Kamera kare göndermedi (zaman aşımı)")
+                }
             }
-        }, 3000)
+        }, 4000)
 
         yuvBurstFrameListener = ImageReader.OnImageAvailableListener { reader ->
             val img = try {
@@ -841,6 +899,14 @@ class Camera2Manager(
             checkBurstComplete(actualFrameCount, completed, collectedFrames, collectedMetadata, collectedResults, onComplete)
         }
 
+        // Önizlemenin ölçtüğü pozlama; manuel braketin temeli
+        val meteredIso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY)
+        val meteredExp = lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME)
+        val useManualBracket = meteredIso != null && meteredExp != null &&
+            flashMode != FlashMode.ON && flashMode != FlashMode.TORCH &&
+            ExposureBracketingStrategy.supportsManualSensor(ch)
+        Log.i(TAG, "Braket yöntemi: ${if (useManualBracket) "manuel ISO/perde" else "AE telafisi"}")
+
         val requests = evShifts.mapNotNull { ev ->
             val b = requestBuilder.build(
                 device = device,
@@ -853,8 +919,12 @@ class Camera2Manager(
 
             // Doğal ve temiz Camera2 pozlaması: Samsung 3A motorunu kör etmek yerine
             // sahneyi doğru ölçmesine izin veriyoruz, OIS ve FAST NR ile stabil burst alıyoruz.
-            b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            ExposureBracketingStrategy.applyEvShift(b, ch, ev)
+            if (useManualBracket) {
+                ExposureBracketingStrategy.applyManualEvShift(b, ch, meteredIso!!, meteredExp!!, ev, isNight)
+            } else {
+                b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                ExposureBracketingStrategy.applyEvShift(b, ch, ev)
+            }
             b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
             b.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
             b.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
@@ -968,7 +1038,8 @@ class Camera2Manager(
     }
 
     private fun onJpegAvailable(image: Image) {
-        val req = captureQueue.peek()
+        // Kareler istek sırasıyla gelir: JPEG'ini henüz almamış ilk isteğe ait
+        val req = captureQueue.firstOrNull { it.jpegBytes == null }
         if (req == null) {
             image.close()
             return
@@ -982,11 +1053,29 @@ class Camera2Manager(
             tryFinishCapture(req)
         } catch (e: Exception) {
             Log.e(TAG, "JPEG okuma hatası", e)
-            captureQueue.remove(req)
+            discardRequest(req)
             mainPost { req.onError() }
         } finally {
             image.close()
         }
+    }
+
+    /** RAW_SENSOR karesi: DNG yazılana kadar açık tutulur, sonra kapatılır. */
+    private fun onRawAvailable(image: Image) {
+        val req = captureQueue.firstOrNull { it.expectsRaw && it.rawImage == null }
+        if (req == null) {
+            image.close()
+            return
+        }
+        req.rawImage = image
+        tryFinishCapture(req)
+    }
+
+    /** İsteği kuyruktan çıkarır ve tuttuğu RAW karesini serbest bırakır. */
+    private fun discardRequest(req: PendingCaptureRequest) {
+        captureQueue.remove(req)
+        try { req.rawImage?.close() } catch (_: Throwable) {}
+        req.rawImage = null
     }
 
     private fun tryFinishCapture(req: PendingCaptureRequest) {
@@ -996,11 +1085,12 @@ class Camera2Manager(
         val bytes = req.jpegBytes ?: return
         val result = req.captureResult ?: stillCaptureResult ?: lastResult
 
-        bgHandler?.post {
+        procHandler.post {
             val prefix = if (req.isProMode) "PRO" else "IMG"
             val name = MediaStoreHelper.timestampName(prefix)
             val uri = MediaStoreHelper.createImageUri(context, "$name.jpg")
             if (uri == null) {
+                discardRequest(req)
                 mainPost { req.onError() }
                 return@post
             }
@@ -1038,42 +1128,16 @@ class Camera2Manager(
 
                 MediaStoreHelper.openOutput(context, uri)?.use { it.write(outputBytes) }
                 try {
+                    // Donanım pikselleri zaten döndürdüyse (etiket "normal") tekrar döndürme etiketi yazma
+                    val exifRotation = ExifHelper.readOrientationDegrees(bytes) ?: req.orientation
                     context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
-                        ExifHelper.writeCaptureMetadata(pfd.fileDescriptor, result, req.location, req.orientation)
+                        ExifHelper.writeCaptureMetadata(pfd.fileDescriptor, result, req.location, exifRotation)
                     }
                 } catch (_: Exception) {}
                 MediaStoreHelper.finalizePending(context, uri)
 
-                // 16-Bit Linear DNG Kaydı
-                if (rawEnabled) {
-                    try {
-                        val dngName = MediaStoreHelper.timestampName("RAW")
-                        val dngUri = MediaStoreHelper.createDngUri(context, dngName)
-                        if (dngUri != null) {
-                            val decoded = android.graphics.BitmapFactory.decodeByteArray(outputBytes, 0, outputBytes.size)
-                            if (decoded != null) {
-                                val mat8 = com.a56camera.pipeline.YuvConverter.bitmapToMat(decoded)
-                                decoded.recycle()
-                                val mat16 = org.opencv.core.Mat()
-                                try {
-                                    mat8.convertTo(mat16, org.opencv.core.CvType.CV_16UC3, 257.0)
-                                    val expNs = result?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 10_000_000L
-                                    val isoVal = result?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 100
-                                    MediaStoreHelper.openOutput(context, dngUri)?.use { os ->
-                                        com.a56camera.pipeline.LinearDngWriter.writeDng(mat16, isoVal, expNs, os)
-                                    }
-                                    MediaStoreHelper.finalizePending(context, dngUri)
-                                    Log.i(TAG, "🌟 [Pro Mode 16-bit DNG] DNG kaydedildi: $dngUri")
-                                } finally {
-                                    mat8.release()
-                                    mat16.release()
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Pro DNG yazma hatası", e)
-                    }
-                }
+                // Gerçek RAW: sensörden gelen RAW_SENSOR karesi DngCreator ile DNG'ye yazılır
+                saveRawIfPresent(req, result)
 
                 val elapsed = System.currentTimeMillis() - req.createTime
                 Log.d("ImagePipeline", "Pipeline tamamlandı: ${elapsed}ms")
@@ -1090,8 +1154,28 @@ class Camera2Manager(
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "JPEG kaydetme hatası", e)
+                discardRequest(req)
                 mainPost { req.onError() }
             }
+        }
+    }
+
+    private fun saveRawIfPresent(req: PendingCaptureRequest, result: TotalCaptureResult?) {
+        val raw = req.rawImage ?: return
+        try {
+            val ch = req.characteristics
+            if (ch != null && result != null) {
+                val dngUri = com.a56camera.utils.DngHelper.saveDng(
+                    context, ch, result, raw, req.location, req.orientation
+                )
+                if (dngUri != null) Log.i(TAG, "RAW DNG kaydedildi: $dngUri")
+                else Log.w(TAG, "RAW DNG kaydedilemedi")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "RAW DNG yazma hatası", e)
+        } finally {
+            try { raw.close() } catch (_: Throwable) {}
+            req.rawImage = null
         }
     }
 
@@ -1100,29 +1184,46 @@ class Camera2Manager(
         startPreviewRepeating()
     }
 
+    /**
+     * Dokunarak odak/pozlama. [lock] = uzun basma: AF/AE kilitlenir ve bir sonraki dokunuşa kadar kalır.
+     * Kilitsiz dokunuşta odak 5 sn dokunulan noktada tutulur, sonra sürekli odağa dönülür.
+     */
     fun focusAt(x: Float, y: Float, lock: Boolean) {
         if (isCameraClosing.get()) return
-        val device = cameraDevice ?: return
-        val ch = characteristics ?: return
-        val readers = imageReaders ?: return
-        val targets = buildList {
-            previewSurface?.let { add(it) }
-            readers.yuvSurface()?.let { add(it) }
-        }
+        cameraDevice ?: return
+        if (focus.isManual()) return
+        val streamAspect = previewSize.width.toFloat() / previewSize.height
+        if (!focus.setTapPoint(x, y, previewView.contentRect(), zoom.currentRatio, streamAspect, lock)) return
+        exposure.aeLocked = false
 
-        val triggerBuilder = requestBuilder.build(device, ch, CameraDevice.TEMPLATE_PREVIEW, targets, flashMode) ?: return
-        requestBuilder.applyTouchFocus(triggerBuilder, x, y, previewView.width, previewView.height)
-        if (lock) {
-            exposure.aeLocked = true
-            triggerBuilder.set(CaptureRequest.CONTROL_AE_LOCK, true)
-        }
+        val triggerBuilder = buildRepeatingRequest() ?: return
+        focus.triggerAf(triggerBuilder)
+        val bg = bgHandler ?: return
+        bg.removeCallbacksAndMessages(focusResetToken)
         sessionManager?.capture(triggerBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
             override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
-                val repeatBuilder = requestBuilder.build(device, ch, CameraDevice.TEMPLATE_PREVIEW, targets, flashMode) ?: return
-                focus.clearAfTrigger(repeatBuilder)
-                sessionManager?.startRepeating(repeatBuilder.build(), previewCallback)
+                if (lock) exposure.aeLocked = true
+                val repeat = buildRepeatingRequest() ?: return
+                focus.clearAfTrigger(repeat)
+                sessionManager?.startRepeating(repeat.build(), previewCallback)
             }
         })
+        if (!lock) {
+            bg.postAtTime({
+                if (!focus.afLocked) {
+                    focus.clearTap()
+                    startPreviewRepeating()
+                }
+            }, focusResetToken, android.os.SystemClock.uptimeMillis() + 5000L)
+        }
+    }
+
+    /** Dokunarak odak/kilidi bırakıp sürekli odağa döner. */
+    fun clearFocusLock() {
+        bgHandler?.removeCallbacksAndMessages(focusResetToken)
+        focus.clearTap()
+        exposure.aeLocked = false
+        startPreviewRepeating()
     }
 
     fun setZoomRatio(ratio: Float) {
@@ -1135,14 +1236,23 @@ class Camera2Manager(
         startPreviewRepeating()
     }
 
-    fun selectModule(module: CameraModule) {
+    /**
+     * Lens/zoom düğmeleri. @return seçim uygulandıysa true (ör. ultra geniş erişilemiyorsa false).
+     */
+    fun selectModule(module: CameraModule): Boolean {
+        if (currentFacing != Camera2Utils.Facing.BACK) return false
+        focus.clearTap()
         when (module) {
             CameraModule.ULTRA_WIDE -> {
                 val uw = Camera2Utils.ultraWideCamera(cameras)
-                if (uw != null && uw.id != currentInfo?.id) {
-                    openCamera(uw)
-                } else {
-                    setZoomRatio(zoom.minZoom())
+                when {
+                    uw != null && uw.id != currentInfo?.id && uw.focalLength < (currentInfo?.focalLength ?: 0f) -> openCamera(uw)
+                    zoom.minZoom() < 0.99f -> setZoomRatio(zoom.minZoom())
+                    else -> {
+                        // Samsung bazı modellerde ultra geniş lensi üçüncü taraf uygulamalara açmıyor
+                        onError?.invoke("Bu telefonda ultra geniş lens uygulamalara açık değil")
+                        return false
+                    }
                 }
             }
             CameraModule.WIDE -> {
@@ -1157,6 +1267,7 @@ class Camera2Manager(
                 } else setZoomRatio(2f)
             }
         }
+        return true
     }
 
     fun toggleLens() {
@@ -1175,51 +1286,82 @@ class Camera2Manager(
 
     fun isRawSupported(): Boolean = currentInfo?.supportsRaw == true
 
+    /** Gece/portre burst çekimi sürüyor mu? */
+    fun isBurstInProgress(): Boolean = burstInProgress.get()
+
+    /** Dikey tutulan telefonda önizlemenin yatay görüş açısı (panorama birleştirme için). */
+    fun portraitHorizontalFovRad(): Double {
+        val info = currentInfo ?: return Math.toRadians(66.0)
+        val size = info.physicalSize ?: return Math.toRadians(66.0)
+        val longSide = maxOf(size.width, size.height)
+        var shortSide = minOf(size.width, size.height)
+        // Önizleme akışı sensörden daha geniş (ör. 16:9) ise sensörün kısa kenarı kırpılır
+        val streamAspect = maxOf(previewSize.width, previewSize.height).toFloat() / minOf(previewSize.width, previewSize.height)
+        if (streamAspect > longSide / shortSide) shortSide = longSide / streamAspect
+        return PanoramaCapture.horizontalFovPortrait(info.focalLength, shortSide, zoom.currentRatio)
+    }
+
     fun refreshPreview() {
         startPreviewRepeating()
     }
 
-    fun startVideoSession(recorderSurface: Surface, fps: Int = 30, onReady: () -> Unit) {
+    /**
+     * Video/time-lapse oturumu: önizleme + kayıt yüzeyi. Kayıt yüzeyi saklanır; kayıt sürerken
+     * zoom/odak/pozlama/flaş değişiklikleri de bu yüzeyi hedefler (eskiden video donuyordu).
+     */
+    fun startVideoSession(
+        recorderSurface: Surface,
+        fps: Int = 30,
+        stabilization: Boolean = false,
+        onReady: () -> Unit
+    ) {
         val device = cameraDevice ?: return
-        val ch = characteristics ?: return
         val session = sessionManager ?: return
+        bgHandler?.removeCallbacksAndMessages(focusResetToken)
+        focus.clearTap()
 
         val preview = previewSurface ?: previewView.createSurface()?.also { previewSurface = it } ?: return
-        val surfaces = listOf(preview, recorderSurface)
-        session.createSession(device, surfaces, object : CaptureSessionManager.Callback {
+        session.createSession(device, listOf(preview, recorderSurface), object : CaptureSessionManager.Callback {
             override fun onConfigured(s: CameraCaptureSession) {
                 if (isCameraClosing.get()) return
-                val builder = requestBuilder.build(
-                    device, ch, CameraDevice.TEMPLATE_RECORD, surfaces, flashMode, forVideo = true
-                ) ?: return
-
-                // İstenen FPS (30 veya 60) için en uygun donanım AE FPS aralığını ayarla
-                val availableRanges = ch.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
-                val targetRange = availableRanges?.find { it.upper == fps && it.lower == fps }
-                    ?: availableRanges?.find { it.upper == fps }
-                if (targetRange != null) {
-                    builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, targetRange)
-                    Log.i("Camera2Manager", "🎯 Video AE FPS Range ayarlandı: $targetRange")
-                }
-
-                session.startRepeating(builder.build(), null)
+                recordingSurface = recorderSurface
+                recordingFps = fps
+                recordingStabilization = stabilization
+                val builder = buildRepeatingRequest() ?: return
+                session.startRepeating(builder.build(), previewCallback)
                 mainPost(onReady)
             }
-            override fun onFailed(reason: String) { onError?.invoke(reason) }
+            override fun onFailed(reason: String) {
+                recordingSurface = null
+                onError?.invoke(reason)
+            }
         })
     }
 
+    /** Kaydı durdurmadan önce: kameranın kayıt yüzeyine kare göndermesini kes. */
+    fun prepareStopRecording() {
+        try { sessionManager?.stopRepeating() } catch (_: Throwable) {}
+    }
+
     fun stopRecordingReturnPreview() {
+        recordingSurface = null
+        focus.clearTap()
         characteristics?.let { chooseSizes(it) }
         createPreviewSession()
     }
 
+    /**
+     * JPEG_ORIENTATION hesabı (Android CaptureRequest.JPEG_ORIENTATION dokümanındaki formül).
+     * [deviceRotation], OrientationEventListener'dan gelen saat yönündeki fiziksel açıdır (0/90/180/270).
+     * Arka kamera: (sensör + açı), ön kamera: (sensör − açı) — ön kamera ayna olduğu için yön terslenir.
+     */
     private fun jpegOrientation(ch: CameraCharacteristics, deviceRotation: Int): Int {
         val sensorOrientation = ch.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val rotation = ((deviceRotation % 360) + 360) % 360
         return if (currentFacing == Camera2Utils.Facing.FRONT) {
-            (360 - (sensorOrientation + deviceRotation) % 360) % 360
+            (sensorOrientation - rotation + 360) % 360
         } else {
-            (sensorOrientation - deviceRotation + 360) % 360
+            (sensorOrientation + rotation) % 360
         }
     }
 
@@ -1228,10 +1370,8 @@ class Camera2Manager(
 
     private fun closeCamera() {
         isCameraClosing.set(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try { extensionSession?.close(); extensionSession = null } catch (_: Throwable) {}
-        }
         yuvBurstFrameListener = null
+        captureQueue.toList().forEach { discardRequest(it) }
         sessionManager?.close()
         try { cameraDevice?.close() } catch (_: Throwable) {}
         cameraDevice = null
@@ -1243,6 +1383,7 @@ class Camera2Manager(
     }
 
     fun release() {
+        recordingSurface = null
         closeCamera()
         stopBackgroundThread()
     }

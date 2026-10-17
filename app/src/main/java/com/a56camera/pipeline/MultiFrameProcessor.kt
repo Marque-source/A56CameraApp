@@ -1,15 +1,10 @@
 package com.a56camera.pipeline
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.util.Log
 import com.a56camera.camera.YuvFrame
-import com.a56camera.camera.toNv21
 import org.opencv.android.Utils
 import org.opencv.calib3d.Calib3d
 import org.opencv.core.Core
@@ -26,7 +21,6 @@ import org.opencv.features2d.ORB
 import org.opencv.imgproc.CLAHE
 import org.opencv.imgproc.Imgproc
 import org.opencv.photo.Photo
-import java.io.ByteArrayOutputStream
 
 /**
  * Samsung S25 / iPhone tarzı çoklu kare ORB hizalamalı ve Mertens Exposure Fusion işlemcisi.
@@ -160,32 +154,24 @@ class MultiFrameProcessor {
         refDesc.release()
         val tAlign = System.currentTimeMillis() - tAlign0
 
-        Log.i(TAG, "📸 Google HDR+ Robust Merge: ${validAligned.size} adet kare birleştiriliyor")
-
-        // 🌟 Google #2 Maddesi: Kasıtlı Alt-Pozlama (-1.0 EV) + Mertens Exposure Fusion
-        // Pozlama farkı olan karelerde (örneğin -1.0 EV ile 0.0 EV) Mertens piramit füzyonu kullanılır:
-        // Parlak alanların (sokak lambası, pencere) detayları -1.0 EV kareden,
-        // Gölgelerin temiz detayları 0.0 EV karelerden alınarak sıfır patlamayla birleştirilir.
+        // Gündüz pozlama braketi (-0.5 EV + 0 EV): Mertens füzyonu parlak alanları -0.5 EV kareden,
+        // gölgeleri 0 EV karelerden alır. Gece burst'ü aynı pozlamayla çekildiği için ortalanır.
         val isNightBurst = frames.any { (it.second.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0) >= 500 } ||
                            frames.any { (it.second.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L) >= 30_000_000L }
         val hasExposureBracket = !isNightBurst && frames.any { it.first.evShift < -0.1f || it.first.evShift > 0.1f }
         if (hasExposureBracket) {
-            Log.i(TAG, "🌟 [Mertens Exposure Fusion] Farklı pozlamalı ${validAligned.size} kare birleştiriliyor (Highlight Restore & Shadow Pop)")
+            Log.i(TAG, "🌟 [Mertens Exposure Fusion] Farklı pozlamalı ${validAligned.size} kare birleştiriliyor")
             val tMertens0 = System.currentTimeMillis()
-            val floatMats = validAligned.map { mat ->
-                val f = Mat()
-                mat.convertTo(f, CvType.CV_32FC3, 1.0 / 255.0)
-                f
-            }
 
+            // DİKKAT: OpenCV MergeMertens her girdiyi içeride 1/255 ile ölçekler (girdi tipine bakmadan).
+            // Bu yüzden kareler 8-bit verilmeli; 0..1 float verilince sonuç ~0 (siyah) çıkıyordu.
             val merger = Photo.createMergeMertens().apply {
                 contrastWeight = 1.0f
                 saturationWeight = 1.0f
                 exposureWeight = 1.0f
             }
-            val fused = Mat()
-            merger.process(floatMats, fused)
-            floatMats.forEach { it.release() }
+            val fused = Mat() // CV_32FC3, yaklaşık 0..1
+            merger.process(validAligned, fused)
 
             val raw16u = if (produceRaw16u) {
                 val r16 = Mat()
@@ -194,136 +180,22 @@ class MultiFrameProcessor {
             } else null
 
             val fused8u = Mat()
-            Core.multiply(fused, Scalar(255.0, 255.0, 255.0), fused)
-            fused.convertTo(fused8u, CvType.CV_8UC3)
+            fused.convertTo(fused8u, CvType.CV_8UC3, 255.0)
             fused.release()
             validAligned.forEach { it.release() }
 
-            val tMertens = System.currentTimeMillis() - tMertens0
-            Log.i(TAG, "⚡ [Mertens Tamamlandı] Süre: ${tMertens}ms | Highlight korumalı kayıpsız dinamik aralık!")
+            Log.i(TAG, "⚡ [Mertens Tamamlandı] Süre: ${System.currentTimeMillis() - tMertens0}ms")
             return ProcessOutput(fused8u, raw16u)
         }
 
-        // ⚡ ARM64 NEON SIMD Donanım Hızlandırma Yolu (Yalnızca standart 8-bit JPEG çekiminde)
-        if (NeonPipelineEngine.isHardwareAccelerated() && validAligned.isNotEmpty() && !produceRaw16u) {
-            try {
-                val tNeonTotal0 = System.currentTimeMillis()
-                var tMatToBmp = 0L
-
-                val tM2B0 = System.currentTimeMillis()
-                var currentResult = YuvConverter.matToBitmap(validAligned[0])
-                tMatToBmp += (System.currentTimeMillis() - tM2B0)
-
-                for (i in 1 until validAligned.size) {
-                    val tM2Bi = System.currentTimeMillis()
-                    val nextBmp = YuvConverter.matToBitmap(validAligned[i])
-                    val outBmp = Bitmap.createBitmap(fullWidth, fullHeight, Bitmap.Config.ARGB_8888)
-                    tMatToBmp += (System.currentTimeMillis() - tM2Bi)
-
-                    val success = NeonPipelineEngine.robustMerge(currentResult, nextBmp, outBmp, madThreshold = 38)
-                    nextBmp.recycle()
-
-                    if (success) {
-                        currentResult.recycle()
-                        currentResult = outBmp
-                    } else {
-                        outBmp.recycle()
-                        Log.w(TAG, "NEON merge adımı başarısız, OpenCV hattına geçiliyor")
-                        break
-                    }
-                }
-
-                val tB2M0 = System.currentTimeMillis()
-                val neonMat = YuvConverter.bitmapToMat(currentResult)
-                val tBmpToMat = System.currentTimeMillis() - tB2M0
-                currentResult.recycle()
-                validAligned.forEach { it.release() }
-
-                val tNeonTotal = System.currentTimeMillis() - tNeonTotal0
-                val tTotal = System.currentTimeMillis() - tTotal0
-
-                Log.i(TAG, "⏱️ [MultiFrame Dağılımı] TOPLAM: ${tTotal}ms | YUV→BGR: ${tYuv}ms | Laplacian: ${tSharp}ms | Hizalama (ORB+Warp): ${tAlign}ms | Mat→Bitmap: ${tMatToBmp}ms | Bitmap→Mat: ${tBmpToMat}ms | NEON Toplam: ${tNeonTotal}ms")
-                return ProcessOutput(neonMat, null)
-            } catch (e: Exception) {
-                Log.w(TAG, "NEON hızlandırmada hata, OpenCV fallback kullanılıyor: ${e.message}")
-            }
-        }
-
-        val refFloat = Mat()
-        validAligned[0].convertTo(refFloat, CvType.CV_32FC3, 1.0 / 255.0)
-
-        // Akümülatör ve Ağırlık Toplamı
-        val accumulator = Mat()
-        refFloat.copyTo(accumulator) // Referans kare ağırlığı daima 1.0
-
-        val weightSum = Mat(fullHeight, fullWidth, CvType.CV_32FC1, Scalar(1.0))
-
-        for (i in 1 until validAligned.size) {
-            val currFloat = Mat()
-            validAligned[i].convertTo(currFloat, CvType.CV_32FC3, 1.0 / 255.0)
-
-            // 1. Referans kare ile mevcut kare arasındaki mutlak fark (MAD / Hareket Tespiti)
-            val diff = Mat()
-            Core.absdiff(currFloat, refFloat, diff)
-
-            // 3 kanalın maksimum farkını al (renk veya parlaklık farkı)
-            val diffChannels = mutableListOf<Mat>()
-            Core.split(diff, diffChannels)
-            val maxDiff = Mat()
-            Core.max(diffChannels[0], diffChannels[1], maxDiff)
-            Core.max(maxDiff, diffChannels[2], maxDiff)
-            diffChannels.forEach { it.release() }
-            diff.release()
-
-            // 2. Outlier Rejection (Hayalet Önleme):
-            // Fark > 0.20 ise sahneden hareketli nesne (insan/kedi/araç) geçiyordur -> Ağırlık = 0.0 (Elenir!)
-            // Fark <= 0.20 ise alan sabittir -> Ağırlık = 1.0 (Gürültü yok edilir!)
-            val weight = Mat()
-            Imgproc.threshold(maxDiff, weight, 0.20, 1.0, Imgproc.THRESH_BINARY_INV)
-            maxDiff.release()
-
-            // Ağırlığı 3 kanala genişlet
-            val weight3ch = Mat()
-            Imgproc.cvtColor(weight, weight3ch, Imgproc.COLOR_GRAY2BGR)
-
-            // Ağırlıklı kareyi akümülatöre ekle
-            val weightedFrame = Mat()
-            Core.multiply(currFloat, weight3ch, weightedFrame)
-            Core.add(accumulator, weightedFrame, accumulator)
-
-            // Toplam ağırlığı güncelle
-            Core.add(weightSum, weight, weightSum)
-
-            currFloat.release()
-            weight.release()
-            weight3ch.release()
-            weightedFrame.release()
-        }
-
-        refFloat.release()
-
-        // 3 kanallı ağırlık matrisi ile normalize et
-        val weightSum3ch = Mat()
-        Imgproc.cvtColor(weightSum, weightSum3ch, Imgproc.COLOR_GRAY2BGR)
-        weightSum.release()
-
-        val normalizedResult = Mat()
-        Core.divide(accumulator, weightSum3ch, normalizedResult)
-        accumulator.release()
-        weightSum3ch.release()
-
-        // 16-Bit Kayıpsız Linear RAW Matrisi (Lightroom & Expert RAW için)
-        val raw16u = if (produceRaw16u) {
-            val r16 = Mat()
-            normalizedResult.convertTo(r16, CvType.CV_16UC3, 65535.0)
-            r16
-        } else null
-
-        val result = Mat()
-        normalizedResult.convertTo(result, CvType.CV_8UC3, 255.0)
-        normalizedResult.release()
+        // Aynı pozlamalı kareler: hareket korumalı eşit ağırlıklı ortalama (gürültü √N kat azalır)
+        val tMerge0 = System.currentTimeMillis()
+        // 16-bit çıktı Expert RAW (doğrusal DNG) için
+        val (result, raw16u) = TemporalMerge.weightedAverage(validAligned, motionThreshold = 0.20, produce16u = produceRaw16u)
         validAligned.forEach { it.release() }
 
+        Log.i(TAG, "⏱️ [MultiFrame] TOPLAM: ${System.currentTimeMillis() - tTotal0}ms | YUV→BGR: ${tYuv}ms | " +
+            "Keskinlik: ${tSharp}ms | Hizalama: ${tAlign}ms | Ortalama: ${System.currentTimeMillis() - tMerge0}ms")
         return ProcessOutput(result, raw16u)
     }
 
@@ -439,15 +311,6 @@ class MultiFrameProcessor {
         // Homografi bulunamadıysa veya bozuksa, kareyi ÇÖPE ATMA!
         // Donanım OIS aktif olduğu için titreşim < 2 pikseldir; NEON MAD kernel zaten korur.
         return aligned ?: frame.clone()
-    }
-
-    private fun unsharpMask(src: Mat, sigma: Double, strength: Double): Mat {
-        val blurred = Mat()
-        Imgproc.GaussianBlur(src, blurred, Size(0.0, 0.0), sigma)
-        val sharpened = Mat()
-        Core.addWeighted(src, 1.0 + strength, blurred, -strength, 0.0, sharpened)
-        blurred.release()
-        return sharpened
     }
 
     private fun yuvToMat(frame: YuvFrame): Mat {

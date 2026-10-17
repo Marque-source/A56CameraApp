@@ -5,6 +5,9 @@ import android.hardware.camera2.TotalCaptureResult
 import android.location.Location
 import androidx.exifinterface.media.ExifInterface
 import java.io.FileDescriptor
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * CaptureResult üst verisini ve GPS konumunu JPEG dosyasının EXIF alanlarına yazar.
@@ -36,8 +39,8 @@ object ExifHelper {
                     exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, it.toString())
                 }
                 r.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { ns ->
-                    val seconds = ns / 1_000_000_000.0
-                    exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, seconds.toString())
+                    // Rasyonel olarak yaz (ondalık dize hızlı enstantanelerde hassasiyet kaybediyordu)
+                    exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, exposureRational(ns))
                 }
                 r.get(CaptureResult.LENS_FOCAL_LENGTH)?.let {
                     exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, "${(it * 1000).toInt()}/1000")
@@ -46,6 +49,20 @@ object ExifHelper {
                     exif.setAttribute(ExifInterface.TAG_F_NUMBER, it.toString())
                 }
             }
+
+            // Çekim tarihi ve cihaz bilgisi: uygulama fotoğrafı yeniden kodladığında ISP'nin yazdığı
+            // EXIF kayboluyor, galeriler "çekim tarihi" ve "kamera modeli"ni gösteremiyordu.
+            val now = Date()
+            val dt = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(now)
+            val offset = SimpleDateFormat("XXX", Locale.US).format(now)
+            exif.setAttribute(ExifInterface.TAG_DATETIME, dt)
+            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, dt)
+            exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, dt)
+            exif.setAttribute(ExifInterface.TAG_OFFSET_TIME, offset)
+            exif.setAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL, offset)
+            exif.setAttribute(ExifInterface.TAG_MAKE, android.os.Build.MANUFACTURER)
+            exif.setAttribute(ExifInterface.TAG_MODEL, android.os.Build.MODEL)
+            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Pixora")
 
             // sRGB Renk Uzayı Mührü (1 = sRGB):
             // Samsung AMOLED panelin renkleri kontrolsüzce Display P3'e gererek
@@ -58,6 +75,28 @@ object ExifHelper {
             e.printStackTrace()
         }
     }
+
+    /** Pozlama süresini EXIF rasyoneline çevirir: 1 sn altı "1/N", üstü "N/1000". */
+    fun exposureRational(ns: Long): String {
+        val seconds = ns / 1_000_000_000.0
+        return if (seconds < 1.0) "1/${Math.round(1.0 / seconds)}" else "${Math.round(seconds * 1000)}/1000"
+    }
+
+    /**
+     * JPEG baytlarındaki EXIF yönünü derece olarak okur. Yön etiketi yoksa null.
+     * Kamera donanımı JPEG_ORIENTATION'ı ya pikselleri döndürerek (etiket = normal) ya da yalnızca
+     * etiket yazarak uygular; ikisini ayırt etmek için gerekir (yoksa fotoğraf iki kez döndürülebilir).
+     */
+    fun readOrientationDegrees(jpeg: ByteArray): Int? = try {
+        when (ExifInterface(java.io.ByteArrayInputStream(jpeg))
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_UNDEFINED)) {
+            ExifInterface.ORIENTATION_NORMAL -> 0
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270
+            else -> null
+        }
+    } catch (_: Exception) { null }
 
     fun writeLocation(fd: FileDescriptor, location: Location) {
         try {

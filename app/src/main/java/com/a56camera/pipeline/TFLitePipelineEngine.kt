@@ -26,11 +26,10 @@ class TFLitePipelineEngine(private val context: Context) {
         private const val TAG = "TFLitePipelineEngine"
     }
 
-    // 4 Ana Yapay Zeka Motorumuz (Donanım Hızlandırma & Gerçek TFLite Modelleri)
+    // 3 yapay zeka modeli: sahne sınıflandırma, Zero-DCE düşük ışık, MiDaS derinlik (portre)
     val sceneOptimizer by lazy { SceneOptimizer(context) }
     val zeroDceEngine by lazy { ZeroDceEngine(context) }
     val portraitEngine by lazy { PortraitDepthEngine(context) }
-    val superResEngine by lazy { SuperResolutionEngine(context) }
 
     @Volatile
     private var isInitialized = false
@@ -42,15 +41,14 @@ class TFLitePipelineEngine(private val context: Context) {
     fun prewarmModels() {
         if (isInitialized) return
         try {
-            Log.d(TAG, "🚀 TFLite 4 Ana Model Pipeline başlatılıyor...")
+            Log.d(TAG, "🚀 TFLite modelleri başlatılıyor...")
             // Lazy referansları tetikleyerek GPU/NPU delegelerini yükle
             val t0 = System.currentTimeMillis()
             val s = sceneOptimizer
             val z = zeroDceEngine
             val p = portraitEngine
-            val r = superResEngine
             isInitialized = true
-            Log.d(TAG, "✅ TFLite 4 Ana Model Pipeline hazır (${System.currentTimeMillis() - t0}ms) - NPU & AMD GPU aktif!")
+            Log.d(TAG, "✅ TFLite modelleri hazır (${System.currentTimeMillis() - t0}ms) - NPU & AMD GPU aktif!")
         } catch (e: Exception) {
             Log.e(TAG, "TFLite modellerini başlatma hatası", e)
         }
@@ -79,13 +77,6 @@ class TFLitePipelineEngine(private val context: Context) {
         return portraitEngine.generateTextureMask(bitmap)
     }
 
-    /**
-     * 4. Süper Keskinlik: Real-ESRGAN x4 AI Detaylandırma (AMD GPU, ~45ms)
-     * Tabela harfleri ve pencere pervazlarını cam gibi netleştirir.
-     */
-    fun enhanceSuperResolution(bitmap: Bitmap): Bitmap {
-        return superResEngine.enhanceResolution(bitmap)
-    }
 
     /**
      * Kaynakları serbest bırak
@@ -95,7 +86,6 @@ class TFLitePipelineEngine(private val context: Context) {
             sceneOptimizer.release()
             zeroDceEngine.release()
             portraitEngine.release()
-            superResEngine.release()
             isInitialized = false
             Log.d(TAG, "TFLite Pipeline modelleri serbest bırakıldı.")
         } catch (_: Exception) {}

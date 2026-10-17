@@ -124,10 +124,10 @@ object LinearDngWriter {
 
             // Yardımcı veri bloklarını doldur (Data Stream içinde bağıl adresler)
             val bitsPerSampleRel = writeShortArray(shortArrayOf(16, 16, 16))
-            val (makeRel, makeCount) = writeAscii("Samsung")
-            val (modelRel, modelCount) = writeAscii("Galaxy A56 5G")
-            val (softwareRel, softwareCount) = writeAscii("A56 Camera 16-Bit Linear HDR DNG")
-            val (cameraModelRel, cameraModelCount) = writeAscii("Samsung Galaxy A56 5G")
+            val (makeRel, makeCount) = writeAscii(android.os.Build.MANUFACTURER ?: "Android")
+            val (modelRel, modelCount) = writeAscii(android.os.Build.MODEL ?: "Android")
+            val (softwareRel, softwareCount) = writeAscii("Pixora 16-Bit Linear HDR DNG")
+            val (cameraModelRel, cameraModelCount) = writeAscii("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
 
             val xResRel = writeRational(72, 1)
             val yResRel = writeRational(72, 1)
@@ -171,8 +171,8 @@ object LinearDngWriter {
             putTag(258, 3, 3, bitsPerSampleRel, true)                        // BitsPerSample [16, 16, 16]
             putTag(259, 3, 1, 1, false)                                      // Compression (1 = Uncompressed)
             putTag(262, 3, 1, 34892, false)                                  // PhotometricInterpretation (34892 = LinearRaw)
-            putTag(271, 2, makeCount, makeRel, true)                         // Make ("Samsung")
-            putTag(272, 2, modelCount, modelRel, true)                       // Model ("Galaxy A56 5G")
+            putTag(271, 2, makeCount, makeRel, true)                         // Make (üretici)
+            putTag(272, 2, modelCount, modelRel, true)                       // Model (cihaz)
             putTag(273, 4, 1, pixelDataOffset, false)                        // StripOffsets
             putTag(274, 3, 1, 1, false)                                      // Orientation (1 = Top-Left)
             putTag(277, 3, 1, 3, false)                                      // SamplesPerPixel (3)

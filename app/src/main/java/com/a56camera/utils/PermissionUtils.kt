@@ -12,21 +12,13 @@ import androidx.core.content.ContextCompat
  */
 object PermissionUtils {
 
-    /** Uygulamanın çalışması için zorunlu izinler. */
+    /**
+     * Uygulamanın açılması için zorunlu izinler: yalnızca kamera (ve Android 9'da dosya yazma).
+     * Mikrofon video başlatılırken, konum ayarlardan açılınca ayrıca istenir. Galeri okuma izni hiç
+     * istenmez: uygulama kendi kaydettiği dosyaları izinsiz okuyabilir (Android 10+).
+     */
     fun requiredPermissions(): Array<String> {
-        val permissions = mutableListOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.RECORD_AUDIO
-        )
-        // Medya okuma izinleri (Android 13+ ayrıştırılmış)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
-            permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
-        } else {
-            @Suppress("DEPRECATION")
-            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-        // Eski cihazlarda dosya yazma
+        val permissions = mutableListOf(Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             @Suppress("DEPRECATION")
             permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)

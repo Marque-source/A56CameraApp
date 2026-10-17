@@ -82,14 +82,17 @@ object MediaStoreHelper {
     fun latestImageUri(context: Context): Uri? {
         val projection = arrayOf(MediaStore.Images.Media._ID)
         val sort = "${MediaStore.Images.Media.DATE_ADDED} DESC"
-        context.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, null, null, sort
-        )?.use { c ->
-            if (c.moveToFirst()) {
-                val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
-                return Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+        try {
+            // İzin istenmediği için (Android 10+) sorgu yalnızca bu uygulamanın kaydettiği görselleri döndürür
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, null, null, sort
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    val id = c.getLong(c.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
+                    return Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+                }
             }
-        }
+        } catch (_: Exception) {}
         return null
     }
 }

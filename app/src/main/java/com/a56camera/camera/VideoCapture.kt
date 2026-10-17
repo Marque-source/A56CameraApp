@@ -32,6 +32,8 @@ class VideoCapture(private val context: Context) {
 
     private var recorder: MediaRecorder? = null
     private var outputUri: Uri? = null
+    /** Kayıt dosyasının tanıtıcısı; kayıt bitince kapatılır (eskiden açık kalıyordu). */
+    private var outputPfd: android.os.ParcelFileDescriptor? = null
     private var recorderSurface: Surface? = null
     var isRecording = false
         private set
@@ -53,6 +55,8 @@ class VideoCapture(private val context: Context) {
         val uri = MediaStoreHelper.createVideoUri(context, "$name.mp4") ?: return null
         outputUri = uri
         val pfd = context.contentResolver.openFileDescriptor(uri, "rw") ?: return null
+        outputPfd?.close()
+        outputPfd = pfd
 
         recorder = createRecorder().apply {
             if (withAudio) setAudioSource(MediaRecorder.AudioSource.MIC)
@@ -107,9 +111,13 @@ class VideoCapture(private val context: Context) {
             isRecording = false
             recorderSurface?.release(); recorderSurface = null
             recorder = null
+            closePfd()
             outputUri?.also { MediaStoreHelper.finalizePending(context, it) }
         } catch (e: Exception) {
             Log.e(TAG, "stop hatası", e)
+            try { recorder?.release() } catch (_: Exception) {}
+            recorder = null; isRecording = false
+            closePfd()
             // Bozuk dosyayı sil
             outputUri?.let { context.contentResolver.delete(it, null, null) }
             null
@@ -123,8 +131,14 @@ class VideoCapture(private val context: Context) {
         recorder = null
         recorderSurface?.release(); recorderSurface = null
         isRecording = false
+        closePfd()
         outputUri?.let { context.contentResolver.delete(it, null, null) }
         outputUri = null
+    }
+
+    private fun closePfd() {
+        try { outputPfd?.close() } catch (_: Exception) {}
+        outputPfd = null
     }
 
     /** Yüksek hızlı (HD_120 vb.) kalitenin cihazda desteklenip desteklenmediğini kontrol eder. */

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Kamera</string>
+    <string name="app_name">Pixora</string>
 
     <!-- Çekim modları -->
     <string name="mode_photo">FOTOĞRAF</string>
@@ -9,28 +9,15 @@
     <string name="mode_night">GECE</string>
     <string name="mode_portrait">PORTRE</string>
     <string name="mode_panorama">PANORAMA</string>
-    <string name="mode_slowmo">AĞIR ÇEKİM</string>
     <string name="mode_timelapse">HIZLANDIRILMIŞ</string>
 
     <!-- Üst çubuk kontrolleri -->
-    <string name="flash_auto">Flaş: Otomatik</string>
-    <string name="flash_on">Flaş: Açık</string>
-    <string name="flash_off">Flaş: Kapalı</string>
-    <string name="flash_torch">Flaş: Fener</string>
     <string name="timer_off">Zamanlayıcı: Kapalı</string>
     <string name="timer_3s">Zamanlayıcı: 3sn</string>
     <string name="timer_10s">Zamanlayıcı: 10sn</string>
-    <string name="hdr_auto">HDR: Otomatik</string>
-    <string name="hdr_on">HDR: Açık</string>
-    <string name="hdr_off">HDR: Kapalı</string>
     <string name="settings_title">Ayarlar</string>
-    <string name="grid_toggle">Izgara</string>
-    <string name="raw_toggle">RAW (DNG)</string>
 
     <!-- Zoom -->
-    <string name="zoom_ultrawide">0.6x</string>
-    <string name="zoom_wide">1x</string>
-    <string name="zoom_tele">2x</string>
 
     <!-- Pro mod -->
     <string name="pro_iso">ISO</string>
@@ -40,79 +27,30 @@
     <string name="pro_ev">EV</string>
     <string name="pro_profile">RENK</string>
     <string name="pro_reset">Sıfırla</string>
-    <string name="pro_auto">OTO</string>
 
     <!-- İçerik açıklamaları -->
     <string name="cd_shutter">Çekim düğmesi</string>
     <string name="cd_switch_camera">Kamerayı çevir</string>
     <string name="cd_gallery">Galeri</string>
-    <string name="cd_flash">Flaş</string>
-    <string name="cd_timer">Zamanlayıcı</string>
     <string name="cd_settings">Ayarlar</string>
-    <string name="cd_hdr">HDR</string>
 
     <!-- İzinler -->
-    <string name="permission_camera_rationale">Kamera uygulamasının çalışması için kamera iznine ihtiyaç var.</string>
-    <string name="permission_denied">İzin verilmedi. Ayarlardan izinleri etkinleştirin.</string>
-    <string name="grant_permissions">İzin Ver</string>
 
     <!-- Bildirimler -->
     <string name="photo_saved">Fotoğraf kaydedildi</string>
     <string name="video_saved">Video kaydedildi</string>
-    <string name="raw_saved">RAW (DNG) kaydedildi</string>
     <string name="recording">Kaydediliyor…</string>
-    <string name="processing">İşleniyor…</string>
     <string name="error_capture">Çekim başarısız oldu</string>
-    <string name="not_supported">Bu cihazda desteklenmiyor</string>
 
     <!-- Ayarlar ekranı -->
-    <string name="settings_photo_category">Fotoğraf</string>
-    <string name="settings_video_category">Video</string>
-    <string name="settings_general_category">Genel</string>
-    <string name="settings_save_location">Konum etiketi (GPS)</string>
-    <string name="settings_save_location_summary">Fotoğraflara GPS konumunu göm (EXIF)</string>
-    <string name="settings_raw_jpeg">RAW + JPEG</string>
-    <string name="settings_raw_jpeg_summary">RAW ile birlikte JPEG de kaydet</string>
-    <string name="settings_shutter_sound">Deklanşör sesi</string>
-    <string name="settings_volume_capture">Ses tuşu ile çekim</string>
-    <string name="settings_volume_capture_summary">Ses tuşlarına basınca fotoğraf çek</string>
-    <string name="settings_video_quality">Video kalitesi</string>
-    <string name="settings_video_stabilization">Video sabitleme (OIS/EIS)</string>
-    <string name="settings_face_detection">Yüz tespiti</string>
-    <string name="settings_grid_type">Izgara tipi</string>
-    <string name="settings_histogram">Histogram göster</string>
 
     <!-- Ayarlar — yeni kategoriler -->
-    <string name="settings_advanced_category">Gelişmiş</string>
-    <string name="settings_samsung_category">Samsung AI / NPU</string>
 
     <!-- Fotoğraf ayarları (yeni) -->
-    <string name="settings_photo_quality">JPEG kalitesi</string>
-    <string name="settings_raw_dng">Sadece RAW (DNG)</string>
-    <string name="settings_raw_dng_summary">Yalnızca işlenmemiş RAW (DNG) kaydet</string>
-    <string name="settings_raw_jpeg_combined">RAW + JPEG birlikte</string>
-    <string name="settings_raw_jpeg_combined_summary">Her çekimde hem RAW (DNG) hem JPEG kaydet</string>
-    <string name="settings_hdr_mode">HDR modu</string>
-    <string name="settings_ai_processing">AI / NPU işleme</string>
-    <string name="settings_noise_reduction">Gürültü azaltma</string>
-    <string name="settings_edge_enhancement">Kenar keskinleştirme</string>
 
     <!-- Video ayarları (yeni) -->
-    <string name="settings_video_codec">Video kodeği</string>
-    <string name="settings_timelapse_interval">Hızlandırılmış aralığı</string>
 
     <!-- Gelişmiş ayarlar (yeni) -->
-    <string name="settings_focus_peaking">Odak peaking (kenar vurgusu)</string>
-    <string name="settings_capture_sound">Deklanşör sesi</string>
-    <string name="settings_location_tagging">Konum damgası (GPS)</string>
-    <string name="settings_location_tagging_summary">Fotoğraflara GPS konumunu göm (EXIF)</string>
-    <string name="settings_leveling_indicator">Seviye göstergesi</string>
 
     <!-- Samsung AI / NPU ayarları (yeni) -->
-    <string name="settings_samsung_hdr">Samsung NPU HDR</string>
-    <string name="settings_samsung_hdr_summary">Donanım hızlandırmalı çok kareli HDR</string>
-    <string name="settings_samsung_lowlight">Samsung NPU düşük ışık</string>
-    <string name="settings_samsung_lowlight_summary">NPU ile çok kareli düşük ışık iyileştirme</string>
-    <string name="settings_samsung_portrait">Samsung NPU portre efekti</string>
-    <string name="settings_samsung_portrait_summary">Donanım hızlandırmalı bokeh / alan derinliği</string>
 </resources>

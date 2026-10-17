@@ -6,6 +6,7 @@ import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
 import android.util.Range
 import android.util.Rational
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 object ExposureBracketingStrategy {
@@ -30,17 +31,65 @@ object ExposureBracketingStrategy {
         return BracketSettings(iso, exp, getEvShifts(isNight))
     }
 
-    // Google Pixel Kasıtlı Alt-Pozlama (Highlight Protection) + Foton Biriktirme:
-    // -1.0 EV: Sokak lambaları, pencereler ve neonların patlamasını %100 önler.
-    // -0.4 EV: Geçiş aydınlatması ve orta ton detayları.
-    // 0.0 EV x 3: Gölgeler ve binalar için foton istifleme (temiz düşük gürültü).
+    // Gece: 5 kare AYNI pozlamayla çekilir ve ortalanır. Gece birleştirmesi (TemporalMerge)
+    // kareleri doğrudan ortaladığı için pozlama farkı olan kareler (-1 / -0.4 EV) gürültüyü
+    // azaltmak yerine görüntüyü karartıyor ve en karanlık kare referans seçiliyordu.
+    // Gündüz: -0.5 EV kare Mertens füzyonunda parlak alanları kurtarmak için kullanılır.
     fun getEvShifts(isNight: Boolean): List<Float> =
-        if (isNight) listOf(-1.0f, -0.4f, 0.0f, 0.0f, 0.0f)
+        if (isNight) listOf(0.0f, 0.0f, 0.0f, 0.0f, 0.0f)
         else listOf(-0.5f, 0.0f, 0.0f)
 
     fun frameCount(isNight: Boolean) = getEvShifts(isNight).size
 
-    /** AE compensation ile EV kaydır. A56'da adım 0.1 EV, aralık [-20,+20]. */
+    /** Cihaz manuel sensör kontrolünü (ISO + perde) destekliyor mu? */
+    fun supportsManualSensor(ch: CameraCharacteristics): Boolean =
+        ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+            ?.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
+
+    /**
+     * Gerçek pozlama braketi: AE'nin önizlemede ölçtüğü pozlamayı (ISO × süre) temel alır ve
+     * her kareye 2^ev katı uygular. AE telafisiyle (applyEvShift) yapılan braket, art arda
+     * gelen burst karelerinde AE yakınsamaya yetişemediği için çoğu zaman aynı pozlamayı verir;
+     * bu fonksiyon AE'yi kapatıp değerleri doğrudan sensöre yazar.
+     *
+     * Gece modunda toplam pozlama korunarak süre 90ms'ye kadar uzatılır, ISO o oranda düşürülür
+     * (aynı parlaklık, daha az gürültü).
+     */
+    fun applyManualEvShift(
+        builder: CaptureRequest.Builder,
+        ch: CameraCharacteristics,
+        meteredIso: Int,
+        meteredExposureNs: Long,
+        evShift: Float,
+        isNight: Boolean
+    ) {
+        val isoRange = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: Range(100, 3200)
+        val expRange = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            ?: Range(100_000L, 1_000_000_000L)
+
+        // Toplam ışık miktarı (ISO·ns) — EV kayması burada uygulanır
+        val target = meteredIso.toDouble() * meteredExposureNs.toDouble() * 2.0.pow(evShift.toDouble())
+
+        val maxHandheldNs = if (isNight) 90_000_000L else 33_000_000L
+        val maxExp = minOf(expRange.upper, maxHandheldNs)
+
+        var exp = meteredExposureNs * 2.0.pow(evShift.toDouble())
+        if (isNight && exp < maxExp) {
+            // Süreyi uzatıp ISO'yu düşür: önce sensörün minimum ISO'suna kadar
+            val expForMinIso = target / isoRange.lower
+            exp = minOf(expForMinIso, maxExp.toDouble())
+        }
+        exp = exp.coerceIn(expRange.lower.toDouble(), maxExp.toDouble())
+        val iso = (target / exp).roundToInt().coerceIn(isoRange.lower, isoRange.upper)
+
+        val expNs = exp.toLong()
+        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+        builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+        builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, expNs)
+        builder.set(CaptureRequest.SENSOR_FRAME_DURATION, expNs)
+    }
+
+    /** AE compensation ile EV kaydır (manuel sensör desteklenmeyen cihazlar için yedek yol). */
     fun applyEvShift(
         builder: CaptureRequest.Builder,
         ch: CameraCharacteristics,

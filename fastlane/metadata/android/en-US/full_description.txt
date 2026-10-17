@@ -1,0 +1,31 @@
+Pixora is an ad-free, open-source camera app built to get more out of your phone's camera.
+
+🌙 NIGHT MODE
+In the dark, Pixora captures a burst of 5 frames instead of one, merges them while protecting moving areas, and removes noise intelligently. The result: brighter, cleaner night photos.
+
+👤 PORTRAIT MODE
+An on-device AI depth map separates your subject from the background and applies a natural background blur.
+
+🎛️ PRO MODE
+Exposure compensation, white balance, color profiles (Natural, Monochrome, Flat Log) and a live histogram. On phones that allow it, ISO, shutter speed and manual focus are unlocked too.
+
+📸 AND MORE
+• Panorama: gyroscope-guided capture with automatic stitching
+• Video: up to 4K where your phone supports it, H.264 or H.265
+• Time-lapse
+• Switch between ultra-wide, main and 2x with one tap
+• Tap to focus and expose, long-press for AF/AE lock
+• Grid (3x3, square, golden ratio), timer, flash
+• Shoot with the volume keys
+• RAW (DNG) capture on supported phones
+• Scene detection
+
+🔒 PRIVACY
+Pixora has no internet permission. Your photos and videos never leave your phone. All AI processing happens on the device. Location tagging is optional and off by default.
+
+⚙️ COMPATIBILITY
+Android 9 and newer. Some features (RAW, manual ISO/shutter, 60 FPS video, video stabilization) depend on whether your phone's camera hardware exposes them to apps; Pixora automatically hides options your phone doesn't support.
+
+Note: the app interface is currently in Turkish. English is coming soon.
+
+Pixora is open source: github.com/Marque-source/A56CameraApp
