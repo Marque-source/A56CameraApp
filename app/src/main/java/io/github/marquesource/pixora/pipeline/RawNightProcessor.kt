@@ -79,6 +79,8 @@ object RawNightProcessor {
         frames: MutableList<Mat>,
         p: Params,
         keepMergedBayer: Boolean = false,
+        /** null = gürültüye göre otomatik; true/false = zorla (test için) */
+        detailTransfer: Boolean? = null,
         dump: ((String, Mat) -> Unit)? = null
     ): Result {
         require(frames.isNotEmpty())
@@ -154,6 +156,12 @@ object RawNightProcessor {
         }
         shadingUp?.forEach { it.release() }
 
+        // Işık yeterliyse (birleşik karede gürültü düşük) tam çözünürlüklü ayrıntı sonradan geri eklenir;
+        // karanlıkta yarım çözünürlük (2x2 birleştirme) gürültüyü bastırdığı için olduğu gibi kalır.
+        val mergedSigma = sqrt((nS * 0.18 + nO).coerceAtLeast(0.0)) / sqrt(shifts.size.toDouble())
+        val useDetail = detailTransfer ?: (mergedSigma < DETAIL_SIGMA_MAX)
+        val detail = if (useDetail) detailMap(acc, p.cfa) else null
+
         // 3) Yarım çözünürlüklü doğrusal RGB (iki yeşilin ortalaması)
         val byChan = arrayOfNulls<Mat>(4)
         for (k in 0 until 4) byChan[chan[k]] = acc[k]
@@ -185,14 +193,61 @@ object RawNightProcessor {
         val full = Mat()
         Imgproc.resize(den, full, Size(den.cols() * 2.0, den.rows() * 2.0), 0.0, 0.0, Imgproc.INTER_CUBIC)
         den.release()
-        val sharp = ToneMapHelper.applyAdaptiveAcutance(full, strength = 0.22, haloThreshold = 24.0, noiseFloor = 3.0)
+        if (detail != null) {
+            // Ayrıntı oranını sRGB'ye taşı (yaklaşık 1/2.2 üs) ve her kanala uygula
+            val f = Mat(); full.convertTo(f, CvType.CV_32FC3)
+            Core.pow(detail, 1.0 / 2.2, detail)
+            val ch = ArrayList<Mat>(3); Core.split(f, ch)
+            for (c in ch) Core.multiply(c, detail, c)
+            Core.merge(ch, f); ch.forEach { it.release() }; detail.release()
+            f.convertTo(full, CvType.CV_8UC3); f.release()
+            dump?.invoke("3b_ayrinti", full)
+        }
+        val sharp = ToneMapHelper.applyAdaptiveAcutance(full, strength = if (detail != null) 0.12 else 0.22,
+            haloThreshold = 24.0, noiseFloor = 3.0)
         full.release()
 
         return Result(sharp, mergedBayer, shifts.size, shifts,
             if (shifts.size > 1) weightTotal / (shifts.size - 1) else 1.0)
     }
 
+    /** Birleşik karedeki gürültü (normalize, orta ton) bunun altındaysa tam çözünürlük ayrıntısı eklenir. */
+    const val DETAIL_SIGMA_MAX = 0.012
+
     // ---------------------------------------------------------------- yardımcılar
+
+    /**
+     * Tam çözünürlüklü ayrıntı haritası: D = Y_tam / büyütülmüş(Y_yarım).
+     * Y = (R + 2G + B) / 4 hem tam (Bayer demozaik) hem yarım çözünürlükte aynı ağırlıklarla hesaplanır;
+     * R ve B'nin ağırlığı eşit olduğundan demozaik kodunda yalnızca yeşilin konumu önemlidir.
+     */
+    private fun detailMap(planes: List<Mat>, cfa: Int): Mat {
+        val ph = planes[0].rows(); val pw = planes[0].cols()
+        val scale = 16383.0   // 0..4 aralığı 16 bite sığsın (beyaz dengesi 1'i aşabilir)
+        val u16 = planes.map { pl -> Mat().also { pl.convertTo(it, CvType.CV_16U, scale) } }
+        val evenTwo = Mat(); Core.merge(listOf(u16[0], u16[1]), evenTwo)
+        val oddTwo = Mat(); Core.merge(listOf(u16[2], u16[3]), oddTwo)
+        val pairs = Mat(); Core.hconcat(listOf(evenTwo.reshape(1, ph), oddTwo.reshape(1, ph)), pairs)
+        val bayer = pairs.reshape(1, ph * 2).clone()
+        u16.forEach { it.release() }; evenTwo.release(); oddTwo.release(); pairs.release()
+
+        val code = if (cfa == 1 || cfa == 2) Imgproc.COLOR_BayerGB2BGR else Imgproc.COLOR_BayerBG2BGR
+        val rgb = Mat(); Imgproc.cvtColor(bayer, rgb, code); bayer.release()
+        val rgbF = Mat(); rgb.convertTo(rgbF, CvType.CV_32FC3, 1.0 / scale); rgb.release()
+        val yFullF = Mat()
+        Core.transform(rgbF, yFullF, Mat(1, 3, CvType.CV_32F).apply { put(0, 0, 0.25, 0.5, 0.25) })
+        rgbF.release()
+
+        val yHalf = Mat(ph, pw, CvType.CV_32F, Scalar(0.0))
+        for (pl in planes) Core.addWeighted(yHalf, 1.0, pl, 0.25, 0.0, yHalf)
+        val yUp = Mat(); Imgproc.resize(yHalf, yUp, yFullF.size(), 0.0, 0.0, Imgproc.INTER_LINEAR); yHalf.release()
+
+        Core.add(yFullF, Scalar(0.002), yFullF); Core.add(yUp, Scalar(0.002), yUp)
+        val d = Mat(); Core.divide(yFullF, yUp, d)
+        Core.min(d, Scalar(1.6), d); Core.max(d, Scalar(0.6), d)
+        yFullF.release(); yUp.release()
+        return d
+    }
 
     /** Ham kareyi 4 yarım çözünürlüklü 32F düzleme ayırır; siyah seviyesi çıkarılır, 0..1 ölçeğine getirilir. */
     fun splitPlanes(raw: Mat, p: Params): List<Mat> {
