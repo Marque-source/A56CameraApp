@@ -950,6 +950,9 @@ class Camera2Manager(
                 bayer.release()
             }
             mainPost { if (uri != null) onSaved(uri) else onError() }
+            // OpenCV Mat'leri yerel bellekte; Java çöp toplayıcısı büyüklüklerini görmediği için
+            // yüzlerce MB'lık geçici tamponlar geç serbest kalıyordu (testte 1,2 GB). Hemen topla.
+            System.gc()
         } catch (e: Throwable) {
             Log.e(TAG, "RAW gece işleme hatası", e)
             pairs.forEach { try { it.first.release() } catch (_: Throwable) {} }

@@ -178,8 +178,9 @@ object RawNightProcessor {
                 m[2], m[1], m[0])   // R'
         }
         Core.transform(bgr, bgr, ccmBgr)
+        ccmBgr.release()
         Core.max(bgr, Scalar(0.0, 0.0, 0.0), bgr)
-        dump?.invoke("1_dogrusal", toPreview8(bgr))
+        if (dump != null) { val pv = toPreview8(bgr); dump("1_dogrusal", pv); pv.release() }
 
         // 5) Ton eşleme (RAW'da beyaz dengesi kameradan geldiği için gri dünya düzeltmesi hafif)
         val toned = NightTone.renderLinear(bgr, saturation = 0.95, grayWorld = 0.25)
