@@ -301,6 +301,12 @@ class CameraActivity : AppCompatActivity() {
         } else if (zoomVal in 0.3f..0.7f) {
             selectModule(CameraModule.ULTRA_WIDE)
         }
+        // Test için (yalnızca debug): gündüz gece çekimini taklit et — pozlamayı nightEv kadar düşür,
+        // nightRaw=false ile RAW yerine eski (YUV) gece yolunu zorla. Karşılaştırmalı testte kullanılır.
+        if (BuildConfig.DEBUG && intent != null && ::camera.isInitialized) {
+            if (intent.hasExtra("nightEv")) camera.debugNightEv = intent.getFloatExtra("nightEv", 0f)
+            if (intent.hasExtra("nightRaw")) camera.debugForceYuvNight = !intent.getBooleanExtra("nightRaw", true)
+        }
         // Otomatik deklanşör yalnızca geliştirme (debug) sürümünde: dışarıdaki herhangi bir uygulamanın
         // bu kamerayı açıp kullanıcının haberi olmadan fotoğraf çektirmesini önler.
         if (BuildConfig.DEBUG && intent?.getBooleanExtra("capture", false) == true) {

@@ -180,6 +180,14 @@ class Camera2Manager(
             }
         }
 
+    /** Yalnızca debug testleri: gece çekiminde ölçülen ışığı 2^ev ile çarp (gündüz karanlığı taklit). */
+    var debugNightEv: Float = 0f
+    /** Yalnızca debug testleri: RAW destekli telefonda da YUV gece yolunu kullan (karşılaştırma). */
+    var debugForceYuvNight: Boolean = false
+
+    private fun debugNightScale(): Double =
+        if (io.github.marquesource.pixora.BuildConfig.DEBUG && debugNightEv != 0f) Math.pow(2.0, debugNightEv.toDouble()) else 1.0
+
     /** Bu kamerada RAW gece modu kullanılabilir mi? */
     fun supportsRawNight(): Boolean {
         val ch = characteristics ?: return false
@@ -679,7 +687,8 @@ class Camera2Manager(
         val ch = characteristics ?: return onError()
         val orientation = jpegOrientation(ch, deviceRotation)
 
-        if (nightRawMode && supportsRawNight() && imageReaders?.rawSurface() != null) {
+        if (nightRawMode && supportsRawNight() && imageReaders?.rawSurface() != null &&
+            !(io.github.marquesource.pixora.BuildConfig.DEBUG && debugForceYuvNight)) {
             captureNightRaw(ch, orientation, location, onProgress, onSaved, onError = {
                 // RAW yolu başarısız olursa kullanıcı eli boş kalmasın: YUV gece yoluna düş
                 Log.w(TAG, "RAW gece başarısız, YUV gece yoluna geçiliyor")
@@ -782,7 +791,7 @@ class Camera2Manager(
         val expRange = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: android.util.Range(100_000L, 1_000_000_000L)
         val mIso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 800
         val mExp = lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 33_000_000L
-        val target = mIso.toDouble() * mExp
+        val target = mIso.toDouble() * mExp * debugNightScale()
         val cap = minOf(expRange.upper, RAW_NIGHT_MAX_EXP_NS).toDouble()
         var exp = (target / isoRange.lower).coerceIn(expRange.lower.toDouble(), cap)
         if (target / exp > isoRange.upper) exp = minOf(target / isoRange.upper, cap)
@@ -1208,7 +1217,8 @@ class Camera2Manager(
             // Doğal ve temiz Camera2 pozlaması: Samsung 3A motorunu kör etmek yerine
             // sahneyi doğru ölçmesine izin veriyoruz, OIS ve FAST NR ile stabil burst alıyoruz.
             if (useManualBracket) {
-                ExposureBracketingStrategy.applyManualEvShift(b, ch, meteredIso!!, meteredExp!!, ev, isNight || bracket.isNight)
+                val dbgExp = if (isNight) (meteredExp!! * debugNightScale()).toLong().coerceAtLeast(100_000L) else meteredExp!!
+                ExposureBracketingStrategy.applyManualEvShift(b, ch, meteredIso!!, dbgExp, ev, isNight || bracket.isNight)
             } else {
                 b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 ExposureBracketingStrategy.applyEvShift(b, ch, ev)
