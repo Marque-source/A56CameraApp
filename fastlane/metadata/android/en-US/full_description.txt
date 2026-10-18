@@ -28,4 +28,4 @@ Android 9 and newer. Some features (RAW, manual ISO/shutter, 60 FPS video, video
 
 Note: the app interface is currently in Turkish. English is coming soon.
 
-Pixora is open source: github.com/Marque-source/A56CameraApp
+Pixora is open source: github.com/Marque-source/Pixora

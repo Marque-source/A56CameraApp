@@ -26,4 +26,4 @@ Pixora'nın internet izni yoktur. Fotoğrafların ve videoların telefonundan d�
 ⚙️ UYUMLULUK
 Android 9 ve üzeri. Bazı özellikler (RAW, elle ISO/enstantane, 60 FPS video, video sabitleme) telefonun kamera donanımının uygulamalara izin vermesine bağlıdır; Pixora telefonunda olmayan seçenekleri otomatik olarak gizler.
 
-Pixora açık kaynaklıdır: github.com/Marque-source/A56CameraApp
+Pixora açık kaynaklıdır: github.com/Marque-source/Pixora
