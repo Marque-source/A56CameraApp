@@ -1,7 +1,10 @@
 Pixora is an ad-free, open-source camera app built to get more out of your phone's camera.
 
 🌙 NIGHT MODE
-In the dark, Pixora captures a burst of 5 frames instead of one, merges them while protecting moving areas, and removes noise intelligently. The result: brighter, cleaner night photos.
+In the dark, Pixora captures a burst of frames instead of one, merges them while protecting moving areas, and removes noise intelligently. The result: brighter, cleaner night photos.
+
+✨ ASTRO MODE
+Put your phone on a tripod or a steady surface and Pixora takes several long exposures of the night sky, removes hot pixels and merges them into a clean star photo. Shown only on phones that support long exposures.
 
 👤 PORTRAIT MODE
 An on-device AI depth map separates your subject from the background and applies a natural background blur.

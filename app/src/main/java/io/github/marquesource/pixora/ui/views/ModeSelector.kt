@@ -37,6 +37,8 @@ class ModeSelector @JvmOverloads constructor(
             val chip = inflater.inflate(R.layout.item_mode, this, false) as TextView
             chip.text = context.getString(mode.titleRes)
             chip.setOnClickListener { select(mode) }
+            // Yıldız modu kamera açılıp uzun pozlama desteği anlaşılana kadar gizli
+            if (mode == CaptureMode.ASTRO) chip.visibility = GONE
             addView(chip)
             chips[mode] = chip
         }
@@ -51,6 +53,16 @@ class ModeSelector @JvmOverloads constructor(
     }
 
     fun current(): CaptureMode = selected
+
+    /**
+     * Telefonun desteklemediği modu gizler (ör. yıldız modu uzun pozlama ister).
+     * Gizlenen mod seçiliyse fotoğraf moduna geçilir.
+     */
+    fun setModeAvailable(mode: CaptureMode, available: Boolean) {
+        val chip = chips[mode] ?: return
+        chip.visibility = if (available) VISIBLE else GONE
+        if (!available && selected == mode) select(CaptureMode.PHOTO)
+    }
 
     private fun updateHighlight(animate: Boolean = false) {
         val selectedBg = ContextCompat.getDrawable(context, R.drawable.bg_mode_pill)

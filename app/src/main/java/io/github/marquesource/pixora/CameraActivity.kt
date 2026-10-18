@@ -40,6 +40,11 @@ import io.github.marquesource.pixora.utils.PermissionUtils
 import com.bumptech.glide.Glide
 import dagger.hilt.android.AndroidEntryPoint
 
+/** Yıldız modu: bu açısal hızın (rad/s) altında telefon "sabit" sayılır (tripod/masada ~0,005). */
+private const val ASTRO_STEADY_RAD_S = 0.025f
+/** Telefon sabitlenmezse en çok bu kadar saniye beklenir, sonra yine de çekilir. */
+private const val ASTRO_MAX_WAIT_S = 10
+
 @AndroidEntryPoint
 class CameraActivity : AppCompatActivity() {
 
@@ -306,6 +311,8 @@ class CameraActivity : AppCompatActivity() {
         if (BuildConfig.DEBUG && intent != null && ::camera.isInitialized) {
             if (intent.hasExtra("nightEv")) camera.debugNightEv = intent.getFloatExtra("nightEv", 0f)
             if (intent.hasExtra("nightRaw")) camera.debugForceYuvNight = !intent.getBooleanExtra("nightRaw", true)
+            if (intent.hasExtra("astroExpMs")) camera.debugAstroExpMs = intent.getIntExtra("astroExpMs", 0).toLong()
+            if (intent.hasExtra("astroIso")) camera.debugAstroIso = intent.getIntExtra("astroIso", 0)
         }
         // Otomatik deklanşör yalnızca geliştirme (debug) sürümünde: dışarıdaki herhangi bir uygulamanın
         // bu kamerayı açıp kullanıcının haberi olmadan fotoğraf çektirmesini önler.
@@ -332,7 +339,12 @@ class CameraActivity : AppCompatActivity() {
         val wasVideo = currentMode.isVideo
         currentMode = mode
         // RAW destekli telefonlarda gece modu ham kareleri birleştirir (oturuma RAW akışı eklenir)
-        if (::camera.isInitialized) camera.nightRawMode = (mode == CaptureMode.NIGHT)
+        if (::camera.isInitialized) camera.nightRawMode = (mode == CaptureMode.NIGHT || mode == CaptureMode.ASTRO)
+        if (mode == CaptureMode.ASTRO && !astroHintShown) {
+            astroHintShown = true
+            Toast.makeText(this, "Yıldız modu: telefonu tripoda ya da sabit bir yere koyun. Çekim yaklaşık 1 dakika sürer.",
+                Toast.LENGTH_LONG).show()
+        }
         // Video/time-lapse 16:9 kaydedilir; önizleme de 16:9 olsun ki görülen = kaydedilen
         if (::camera.isInitialized && mode.isVideo != wasVideo) {
             camera.aspectRatio = if (mode.isVideo) AspectRatio.RATIO_16_9 else currentAspectRatio
@@ -705,6 +717,8 @@ class CameraActivity : AppCompatActivity() {
         if (!eis) selectedVideoEis = false
 
         setAvailable(p.btnPhotoRawOn, camera.isRawSupported())
+        // Yıldız modu yalnızca RAW + uzun pozlama (≥1 sn) destekleyen telefonlarda görünür
+        binding.modeContainer.setModeAvailable(CaptureMode.ASTRO, camera.supportsAstro())
 
         refreshVideoSettingsUi()
         refreshPhotoSettingsUi()
@@ -996,6 +1010,11 @@ class CameraActivity : AppCompatActivity() {
     }
 
     private fun cancelTimer() {
+        if (astroCountingDown) {
+            astroCountingDown = false
+            stopGyroWatch()
+            stopNightCaptureUi()
+        }
         timerRunning = false
         timerRunnable?.let { binding.root.removeCallbacks(it) }
         timerRunnable = null
@@ -1004,7 +1023,8 @@ class CameraActivity : AppCompatActivity() {
 
     private fun performCapture() {
         // Çok kareli çekim sürerken ikinci bir çekim kareleri karıştırıyordu
-        if ((currentMode == CaptureMode.NIGHT || currentMode == CaptureMode.PORTRAIT) && camera.isBurstInProgress()) {
+        if ((currentMode == CaptureMode.NIGHT || currentMode == CaptureMode.PORTRAIT || currentMode == CaptureMode.ASTRO) &&
+            camera.isBurstInProgress()) {
             Toast.makeText(this, "Önceki çekim bitmeden yeni çekim yapılamaz", Toast.LENGTH_SHORT).show()
             return
         }
@@ -1012,6 +1032,7 @@ class CameraActivity : AppCompatActivity() {
             CaptureMode.VIDEO -> toggleVideo()
             CaptureMode.TIME_LAPSE -> toggleTimeLapse()
             CaptureMode.NIGHT -> captureNight()
+            CaptureMode.ASTRO -> startAstroCountdown()
             CaptureMode.PORTRAIT -> capturePortrait()
             CaptureMode.PANORAMA -> togglePanorama()
             CaptureMode.PRO -> capturePro()
@@ -1139,6 +1160,144 @@ class CameraActivity : AppCompatActivity() {
                 runOnUiThread {
                     stopNightCaptureUi()
                     Toast.makeText(this@CameraActivity, "Gece çekim hatası", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    // ─── Yıldız (uzun pozlama) modu ───
+    private var astroHintShown = false
+    private var astroCountingDown = false
+    private var astroTicker: Runnable? = null
+    private var gyroListener: android.hardware.SensorEventListener? = null
+    /** Son ölçülen açısal hız (rad/s) — telefon kıpırdıyor mu? */
+    @Volatile private var gyroMotion = 0f
+
+    private fun startGyroWatch() {
+        val sm = getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager ?: return
+        val gyro = sm.getDefaultSensor(android.hardware.Sensor.TYPE_GYROSCOPE) ?: return
+        gyroMotion = 0f
+        val l = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(e: android.hardware.SensorEvent) {
+                val m = kotlin.math.sqrt(e.values[0] * e.values[0] + e.values[1] * e.values[1] + e.values[2] * e.values[2])
+                // Kısa süreli tepeleri tut, yavaşça söndür
+                gyroMotion = maxOf(m, gyroMotion * 0.9f)
+            }
+            override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+        }
+        sm.registerListener(l, gyro, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+        gyroListener = l
+    }
+
+    private fun stopGyroWatch() {
+        val sm = getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager
+        gyroListener?.let { sm?.unregisterListener(it) }
+        gyroListener = null
+    }
+
+    /** Telefon sabit mi? (Jiroskop yoksa sabit kabul edilir.) */
+    private fun isSteady(): Boolean = gyroListener == null || gyroMotion < ASTRO_STEADY_RAD_S
+
+    /**
+     * Yıldız çekiminden önce 3 sn geri sayım: deklanşöre basarken oluşan sarsıntı geçsin.
+     * Telefon kıpırdıyorsa uyarır ve sabitlenene kadar bekler (en çok 10 sn, sonra yine de çeker).
+     */
+    private fun startAstroCountdown() {
+        if (!camera.supportsAstro()) {
+            Toast.makeText(this, "Bu telefon uzun pozlamayı desteklemiyor", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startGyroWatch()
+        startNightCaptureUi()
+        astroCountingDown = true
+        timerRunning = true
+        var remaining = 3
+        var waited = 0
+        val tick = object : Runnable {
+            override fun run() {
+                if (!timerRunning || !astroCountingDown) return
+                val steady = isSteady()
+                if (remaining > 0) {
+                    if (steady || waited >= ASTRO_MAX_WAIT_S) {
+                        binding.nightCaptureLabel.text = "✨ Yıldız çekimi $remaining sn sonra başlıyor"
+                        remaining--
+                    } else {
+                        binding.nightCaptureLabel.text = "✋ Telefon hareket ediyor — sabit bir yere koyun"
+                        remaining = 3   // sabitlenince sayım baştan
+                    }
+                    waited++
+                    binding.root.postDelayed(this, 1000)
+                } else {
+                    astroCountingDown = false
+                    timerRunning = false
+                    timerRunnable = null
+                    if (!steady) Toast.makeText(this@CameraActivity, "Telefon sabit değil, yıldızlar iz bırakabilir", Toast.LENGTH_SHORT).show()
+                    captureAstro()
+                }
+            }
+        }
+        timerRunnable = tick
+        binding.root.post(tick)
+    }
+
+    private fun stopAstroTicker() {
+        astroTicker?.let { binding.root.removeCallbacks(it) }
+        astroTicker = null
+    }
+
+    private fun captureAstro() {
+        animateShutter()
+        var frames = 0
+        var frameDone = 0
+        var endAt = 0L
+        camera.captureAstro(
+            location = currentLocation(),
+            deviceRotation = deviceRotationDegrees(),
+            onProgress = { step ->
+                runOnUiThread {
+                    when {
+                        step.startsWith("ASTRO_PLAN:") -> {
+                            val parts = step.split(":")
+                            frames = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                            val expMs = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+                            endAt = System.currentTimeMillis() + frames * expMs
+                            stopAstroTicker()
+                            val t = object : Runnable {
+                                override fun run() {
+                                    val left = ((endAt - System.currentTimeMillis()) / 1000L).coerceAtLeast(0L)
+                                    val shake = if (!isSteady()) "  ✋ Kıpırdatmayın!" else ""
+                                    binding.nightCaptureLabel.text =
+                                        "✨ Yıldızlar toplanıyor  ${frameDone + 1}/$frames  •  $left sn$shake"
+                                    binding.root.postDelayed(this, 500)
+                                }
+                            }
+                            astroTicker = t
+                            binding.root.post(t)
+                        }
+                        step.startsWith("ASTRO_FRAME:") -> frameDone = step.split(":").getOrNull(1)?.toIntOrNull() ?: frameDone
+                        step == "DONE_CAPTURE" -> {
+                            stopAstroTicker(); stopGyroWatch()
+                            stopNightCaptureUi()
+                            Toast.makeText(this@CameraActivity, "✨ Çekildi! Yıldızlar birleştiriliyor...", Toast.LENGTH_SHORT).show()
+                        }
+                        else -> binding.nightCaptureLabel.text = "✨ $step"
+                    }
+                }
+            },
+            onSaved = { uri ->
+                runOnUiThread {
+                    stopAstroTicker(); stopGyroWatch()
+                    stopNightCaptureUi()
+                    if (deliverCaptureResult(uri)) return@runOnUiThread
+                    updateGalleryThumb(uri)
+                    Toast.makeText(this@CameraActivity, "🌌 Yıldız Fotoğrafı Hazır!", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onError = {
+                runOnUiThread {
+                    stopAstroTicker(); stopGyroWatch()
+                    stopNightCaptureUi()
+                    Toast.makeText(this@CameraActivity, "Yıldız çekimi hatası", Toast.LENGTH_SHORT).show()
                 }
             }
         )
@@ -1616,6 +1775,7 @@ class CameraActivity : AppCompatActivity() {
         histogramHandler.removeCallbacks(histogramTick)
         stopLocationUpdates()
         cancelTimer()
+        stopAstroTicker(); stopGyroWatch()
         if (isRecording) {
             // Kayıt iptal edilip silinmez, kaydedilir
             when (currentMode) {

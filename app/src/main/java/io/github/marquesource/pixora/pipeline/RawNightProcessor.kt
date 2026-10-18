@@ -81,14 +81,23 @@ object RawNightProcessor {
         keepMergedBayer: Boolean = false,
         /** null = gürültüye göre otomatik; true/false = zorla (test için) */
         detailTransfer: Boolean? = null,
+        /** Yıldız (uzun pozlama) modu: sıcak piksel temizliği, karanlık gökyüzü tonu, tam ayrıntı yok */
+        astro: Boolean = false,
         dump: ((String, Mat) -> Unit)? = null
     ): Result {
         require(frames.isNotEmpty())
         val chan = planeChannels(p.cfa)
 
+        // Uzun pozlamada sensörün "sıcak pikselleri" her karede aynı yerde parlak nokta bırakır.
+        // Yıldızlar gökyüzü döndükçe kareler arasında kayar, sıcak pikseller kaymaz: tüm karelerin
+        // en düşük değeri bile komşularından çok parlaksa o piksel sıcaktır.
+        val hotMasks = if (astro && frames.size >= 3) findHotPixels(frames, p) else null
+        dump?.let { d -> hotMasks?.let { m -> d("0_sicak_piksel", m[0]) } }
+
         // 1) Referans düzlemleri (siyah seviyesi çıkarılmış, 0..1)
         val refPlanes = splitPlanes(frames[0], p)
         frames[0].release()
+        hotMasks?.let { fixHotPixels(refPlanes, it) }
         val refGreen = green(refPlanes, chan)
 
         // Gürültü modeli (yeşil düzlem için σ(x))
@@ -110,6 +119,7 @@ object RawNightProcessor {
         for (i in 1 until frames.size) {
             val planes = splitPlanes(frames[i], p)
             frames[i].release()
+            hotMasks?.let { fixHotPixels(planes, it) }
             val g = green(planes, chan)
             val shift = estimateShift(refGreen, g)
             shifts.add(shift)
@@ -159,7 +169,8 @@ object RawNightProcessor {
         // Işık yeterliyse (birleşik karede gürültü düşük) tam çözünürlüklü ayrıntı sonradan geri eklenir;
         // karanlıkta yarım çözünürlük (2x2 birleştirme) gürültüyü bastırdığı için olduğu gibi kalır.
         val mergedSigma = sqrt((nS * 0.18 + nO).coerceAtLeast(0.0)) / sqrt(shifts.size.toDouble())
-        val useDetail = detailTransfer ?: (mergedSigma < DETAIL_SIGMA_MAX)
+        hotMasks?.forEach { it.release() }
+        val useDetail = detailTransfer ?: (!astro && mergedSigma < DETAIL_SIGMA_MAX)
         val detail = if (useDetail) detailMap(acc, p.cfa) else null
 
         // 3) Yarım çözünürlüklü doğrusal RGB (iki yeşilin ortalaması)
@@ -183,7 +194,9 @@ object RawNightProcessor {
         if (dump != null) { val pv = toPreview8(bgr); dump("1_dogrusal", pv); pv.release() }
 
         // 5) Ton eşleme (RAW'da beyaz dengesi kameradan geldiği için gri dünya düzeltmesi hafif)
-        val toned = NightTone.renderLinear(bgr, saturation = 0.95, grayWorld = 0.25)
+        // Yıldız modunda gökyüzü gece gibi koyu kalsın (gri bir "gündüz" gökyüzü olmasın)
+        val toned = if (astro) NightTone.renderLinear(bgr, targetKey = 0.07, maxGain = 16.0, saturation = 1.0, grayWorld = 0.15)
+            else NightTone.renderLinear(bgr, saturation = 0.95, grayWorld = 0.25)
         dump?.invoke("2_ton", toned)
 
         // 6) Gürültü azaltma (yarım çözünürlükte) ve tam çözünürlüğe büyütme
@@ -210,6 +223,32 @@ object RawNightProcessor {
 
         return Result(sharp, mergedBayer, shifts.size, shifts,
             if (shifts.size > 1) weightTotal / (shifts.size - 1) else 1.0)
+    }
+
+    /** Düzlem başına sıcak piksel maskeleri (CV_8U, 255 = sıcak). */
+    fun findHotPixels(frames: List<Mat>, p: Params): List<Mat> {
+        val tmin = frames[0].clone()
+        for (i in 1 until frames.size) Core.min(tmin, frames[i], tmin)
+        val planes = splitPlanes(tmin, p); tmin.release()
+        return planes.map { pl ->
+            val med = Mat(); Imgproc.medianBlur(pl, med, 3)
+            val diff = Mat(); Core.subtract(pl, med, diff)
+            // Komşu medyanının üstünde: mutlak 0,02 (≈ beyazın %2'si) ve göreli %50
+            val thr = Mat(); Core.multiply(med, Scalar(0.5), thr); Core.max(thr, Scalar(0.02), thr)
+            val mask = Mat(); Core.compare(diff, thr, mask, Core.CMP_GT)
+            // Komşu pikselleri de kapsasın (sıcak pikseller bazen 2 piksellik)
+            Imgproc.dilate(mask, mask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0)))
+            pl.release(); med.release(); diff.release(); thr.release()
+            mask
+        }
+    }
+
+    /** Maskelenen pikselleri aynı renk düzlemindeki 5x5 medyanla değiştirir. */
+    private fun fixHotPixels(planes: List<Mat>, masks: List<Mat>) {
+        for (k in planes.indices) {
+            val med = Mat(); Imgproc.medianBlur(planes[k], med, 5)
+            med.copyTo(planes[k], masks[k]); med.release()
+        }
     }
 
     /** Birleşik karedeki gürültü (normalize, orta ton) bunun altındaysa tam çözünürlük ayrıntısı eklenir. */

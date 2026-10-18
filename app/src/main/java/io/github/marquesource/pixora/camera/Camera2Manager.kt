@@ -72,6 +72,11 @@ class Camera2Manager(
     private val RAW_NIGHT_FRAMES = 6
     /** Elde tutarken kare başına en uzun süre (Note 10S'de OIS yok). */
     private val RAW_NIGHT_MAX_EXP_NS = 80_000_000L
+    /** Yıldız modu: tripodda kare başına en uzun süre (yıldızlar ~15 sn sonra iz bırakmaya başlar). */
+    private val ASTRO_MAX_EXP_NS = 10_000_000_000L
+    /** Yıldız modunda kullanılabilmesi için gereken en kısa azami pozlama. */
+    private val ASTRO_MIN_SUPPORTED_EXP_NS = 1_000_000_000L
+    private val ASTRO_ISO = 1600
     private val systemManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     private var bgThread: HandlerThread? = null
@@ -185,8 +190,24 @@ class Camera2Manager(
     /** Yalnızca debug testleri: RAW destekli telefonda da YUV gece yolunu kullan (karşılaştırma). */
     var debugForceYuvNight: Boolean = false
 
+    /** Yalnızca debug testleri: yıldız modunda kare süresini (ms) / ISO'yu zorla (lens kapalı sıcak piksel testi). */
+    var debugAstroExpMs: Long = 0L
+    var debugAstroIso: Int = 0
+
     private fun debugNightScale(): Double =
         if (io.github.marquesource.pixora.BuildConfig.DEBUG && debugNightEv != 0f) Math.pow(2.0, debugNightEv.toDouble()) else 1.0
+
+    /**
+     * Yıldız (uzun pozlama) modu kullanılabilir mi? RAW gece desteğine ek olarak sensörün en az
+     * 1 saniyelik pozlamaya izin vermesi gerekir (Note 10S: 30 sn; Galaxy A56: 0,1 sn → gizlenir).
+     */
+    fun supportsAstro(): Boolean {
+        val ch = characteristics ?: return false
+        if (!supportsRawNight()) return false
+        val expMax = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)?.upper ?: return false
+        val frameMax = ch.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: expMax
+        return minOf(expMax, frameMax) >= ASTRO_MIN_SUPPORTED_EXP_NS
+    }
 
     /** Bu kamerada RAW gece modu kullanılabilir mi? */
     fun supportsRawNight(): Boolean {
@@ -699,6 +720,23 @@ class Camera2Manager(
         captureNightYuv(ch, orientation, location, onProgress, onSaved, onError)
     }
 
+    /**
+     * Yıldız / uzun pozlama: telefon sabitken (tripod, yere dayalı) saniyeler süren RAW kareler çekilir,
+     * sıcak pikseller temizlenip kareler birleştirilir. Yalnızca [supportsAstro] olan telefonlarda.
+     * İlerleme: önce "ASTRO_PLAN:<kare>:<ms>", her kareden sonra "ASTRO_FRAME:<i>:<kare>", sonra "DONE_CAPTURE".
+     */
+    fun captureAstro(
+        location: Location?,
+        deviceRotation: Int,
+        onProgress: ((String) -> Unit)? = null,
+        onSaved: (Uri) -> Unit,
+        onError: () -> Unit
+    ) {
+        val ch = characteristics ?: return onError()
+        if (!supportsAstro() || imageReaders?.rawSurface() == null) return onError()
+        captureNightRaw(ch, jpegOrientation(ch, deviceRotation), location, onProgress, onSaved, onError, astro = true)
+    }
+
     private fun captureNightYuv(
         ch: CameraCharacteristics,
         orientation: Int,
@@ -778,7 +816,8 @@ class Camera2Manager(
         location: Location?,
         onProgress: ((String) -> Unit)?,
         onSaved: (Uri) -> Unit,
-        onError: () -> Unit
+        onError: () -> Unit,
+        astro: Boolean = false
     ) {
         val device = cameraDevice ?: return onError()
         val readers = imageReaders ?: return onError()
@@ -792,14 +831,42 @@ class Camera2Manager(
         val mIso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 800
         val mExp = lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 33_000_000L
         val target = mIso.toDouble() * mExp * debugNightScale()
-        val cap = minOf(expRange.upper, RAW_NIGHT_MAX_EXP_NS).toDouble()
-        var exp = (target / isoRange.lower).coerceIn(expRange.lower.toDouble(), cap)
-        if (target / exp > isoRange.upper) exp = minOf(target / isoRange.upper, cap)
-        val expNs = exp.toLong()
-        val iso = (target / exp).toInt().coerceIn(isoRange.lower, isoRange.upper)
-        val n = RAW_NIGHT_FRAMES
-        Log.i(TAG, "🌙 RAW gece: $n kare, ISO=$iso, süre=${expNs / 1_000_000}ms (ölçüm ISO=$mIso, ${mExp / 1_000_000}ms)")
-        mainPost { onProgress?.invoke("RAW gece çekimi ($n kare)...") }
+        val frameMax = ch.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: expRange.upper
+        val expNs: Long
+        val iso: Int
+        val n: Int
+        if (astro) {
+            // Önizleme ~0,1 sn'de takılı kalır; gerçekten karanlıksa (ölçüm sınırda) en uzun süre + ISO 1600.
+            // Aydınlık sahnede (ay, şehir ışıkları, gündüz testi) ölçülen ışık korunur, yalnız süre uzar.
+            val cap = minOf(expRange.upper, frameMax, ASTRO_MAX_EXP_NS).toDouble()
+            val astroIso = ASTRO_ISO.coerceIn(isoRange.lower, isoRange.upper)
+            val metered = target / astroIso
+            var e = metered.coerceIn(expRange.lower.toDouble(), cap)
+            val atLimit = mIso >= isoRange.upper * 0.5 && debugNightScale() == 1.0
+            if (atLimit) e = cap
+            var i = if (atLimit) astroIso else (target / e).toInt().coerceIn(isoRange.lower, astroIso)
+            if (io.github.marquesource.pixora.BuildConfig.DEBUG && debugAstroExpMs > 0) {
+                e = (debugAstroExpMs * 1_000_000.0).coerceIn(expRange.lower.toDouble(), cap)
+            }
+            if (io.github.marquesource.pixora.BuildConfig.DEBUG && debugAstroIso > 0) {
+                i = debugAstroIso.coerceIn(isoRange.lower, isoRange.upper)
+            }
+            expNs = e.toLong(); iso = i
+            // Uzun karelerde 6 yeterli (~1 dk); kısa karelerde gürültü için 8 (bellek sınırı)
+            n = if (expNs >= 4_000_000_000L) 6 else 8
+            Log.i(TAG, "✨ Yıldız: $n kare, ISO=$iso, süre=${expNs / 1_000_000}ms (ölçüm ISO=$mIso, ${mExp / 1_000_000}ms, sınırda=$atLimit)")
+            mainPost { onProgress?.invoke("ASTRO_PLAN:$n:${expNs / 1_000_000}") }
+        } else {
+            val cap = minOf(expRange.upper, RAW_NIGHT_MAX_EXP_NS).toDouble()
+            var exp = (target / isoRange.lower).coerceIn(expRange.lower.toDouble(), cap)
+            if (target / exp > isoRange.upper) exp = minOf(target / isoRange.upper, cap)
+            expNs = exp.toLong()
+            iso = (target / exp).toInt().coerceIn(isoRange.lower, isoRange.upper)
+            n = RAW_NIGHT_FRAMES
+            Log.i(TAG, "🌙 RAW gece: $n kare, ISO=$iso, süre=${expNs / 1_000_000}ms (ölçüm ISO=$mIso, ${mExp / 1_000_000}ms)")
+            mainPost { onProgress?.invoke("RAW gece çekimi ($n kare)...") }
+        }
+        val completedFrames = java.util.concurrent.atomic.AtomicInteger(0)
 
         val w = rawReader.width; val h = rawReader.height
         val frames = java.util.TreeMap<Long, org.opencv.core.Mat>()
@@ -837,7 +904,7 @@ class Camera2Manager(
                 return
             }
             mainPost { onProgress?.invoke("DONE_CAPTURE") }
-            procHandler.post { processRawNight(ch, pairs, orientation, location, onProgress, onSaved, onError) }
+            procHandler.post { processRawNight(ch, pairs, orientation, location, onProgress, onSaved, onError, astro) }
         }
 
         fun checkComplete() {
@@ -877,9 +944,18 @@ class Camera2Manager(
                 set(CaptureRequest.SENSOR_FRAME_DURATION, expNs)
                 set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                 set(CaptureRequest.CONTROL_AWB_LOCK, true)
-                if (focus.hasAf) set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                if (astro && focus.manualFocusSupported) {
+                    // Yıldızlar sonsuzda; karanlıkta otomatik odak tutmaz ve kareler arası kayar
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                    set(CaptureRequest.LENS_FOCUS_DISTANCE, 0f)
+                } else if (focus.hasAf) {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                }
                 set(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
-                set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+                // Tripodda OIS titreşim katabilir; yıldız modunda kapalı
+                set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                    if (astro) CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF else CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+                if (astro) set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF)
                 zoom.applyTo(this)
             }.build()
         }
@@ -888,13 +964,17 @@ class Camera2Manager(
             if (done.get()) return@postDelayed
             val got = synchronized(frames) { frames.keys.count { results.containsKey(it) } }
             if (got >= 2) finish() else fail("zaman aşımı ($got kare)")
-        }, 3000L + n * expNs / 1_000_000L)
+        }, (if (astro) 8000L else 3000L) + n * (expNs / 1_000_000L + if (astro) 500L else 0L))
 
         try {
             sessionManager?.captureBurst(requests, object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
                     val ts = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
                     synchronized(frames) { results[ts] = result }
+                    if (astro) {
+                        val k = completedFrames.incrementAndGet()
+                        if (k < n) mainPost { onProgress?.invoke("ASTRO_FRAME:$k:$n") }
+                    }
                     checkComplete()
                 }
                 override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) {
@@ -913,22 +993,24 @@ class Camera2Manager(
         location: Location?,
         onProgress: ((String) -> Unit)?,
         onSaved: (Uri) -> Unit,
-        onError: () -> Unit
+        onError: () -> Unit,
+        astro: Boolean = false
     ) {
         try {
             pipeline.initOpenCV()
             val ref = pairs.first().second
             val params = rawParams(ch, ref)
-            val dump = io.github.marquesource.pixora.pipeline.DebugDump(context, "raw_gece")
+            val dump = io.github.marquesource.pixora.pipeline.DebugDump(context, if (astro) "yildiz" else "raw_gece")
             dump.text("bilgi.txt", "kare=${pairs.size} iso=${ref.get(CaptureResult.SENSOR_SENSITIVITY)} " +
                 "süre=${ref.get(CaptureResult.SENSOR_EXPOSURE_TIME)} cfa=${params.cfa} siyah=${params.blackLevel.joinToString()} " +
                 "beyaz=${params.whiteLevel} wb=${params.wbGains.joinToString()} ccm=${params.ccm.joinToString()} " +
                 "gölge=${params.shading?.size()} gürültü=${params.noiseScale},${params.noiseOffset} cihaz=${Build.MODEL}")
-            mainPost { onProgress?.invoke("Ham kareler birleştiriliyor...") }
+            mainPost { onProgress?.invoke(if (astro) "Yıldızlar birleştiriliyor..." else "Ham kareler birleştiriliyor...") }
             val t0 = System.currentTimeMillis()
             val result = io.github.marquesource.pixora.pipeline.RawNightProcessor.process(
                 pairs.map { it.first }.toMutableList(), params,
                 keepMergedBayer = rawEnabled,
+                astro = astro,
                 dump = if (dump.enabled) { name, m -> dump.mat(name, m) } else null
             )
             params.shading?.release()
@@ -946,7 +1028,8 @@ class Camera2Manager(
                 val bb = java.nio.ByteBuffer.allocateDirect(shorts.size * 2).order(java.nio.ByteOrder.nativeOrder())
                 bb.asShortBuffer().put(shorts)
                 io.github.marquesource.pixora.utils.DngHelper.saveDngBuffer(
-                    context, ch, ref, bb, bayer.cols(), bayer.rows(), location, orientation)
+                    context, ch, ref, bb, bayer.cols(), bayer.rows(), location, orientation,
+                    prefix = if (astro) "RAW_YILDIZ" else "RAW_GECE")
                 bayer.release()
             }
             mainPost { if (uri != null) onSaved(uri) else onError() }

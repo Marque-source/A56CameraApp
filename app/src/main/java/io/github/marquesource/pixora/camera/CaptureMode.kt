@@ -11,13 +11,15 @@ enum class CaptureMode(val titleRes: Int, val isVideo: Boolean = false) {
     VIDEO(R.string.mode_video, isVideo = true),
     PRO(R.string.mode_pro),
     NIGHT(R.string.mode_night),
+    /** Uzun pozlama / yıldız: yalnızca RAW + uzun pozlama destekleyen telefonlarda görünür. */
+    ASTRO(R.string.mode_astro),
     PORTRAIT(R.string.mode_portrait),
     PANORAMA(R.string.mode_panorama),
     TIME_LAPSE(R.string.mode_timelapse, isVideo = true);
 
     companion object {
         /** Mod seçicide gösterilecek sıralama. */
-        val ordered = listOf(NIGHT, PORTRAIT, PHOTO, VIDEO, PRO, PANORAMA, TIME_LAPSE)
+        val ordered = listOf(ASTRO, NIGHT, PORTRAIT, PHOTO, VIDEO, PRO, PANORAMA, TIME_LAPSE)
     }
 }
 

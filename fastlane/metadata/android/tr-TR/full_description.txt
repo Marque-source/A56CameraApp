@@ -1,7 +1,10 @@
 Pixora, telefonunun kamerasından daha fazlasını çıkarmak için tasarlanmış, reklamsız ve açık kaynaklı bir kamera uygulamasıdır.
 
 🌙 GECE MODU
-Pixora karanlıkta tek kare yerine art arda 5 kare çeker, hareket eden bölgeleri koruyarak birleştirir ve gürültüyü akıllıca azaltır. Sonuç: daha aydınlık, daha temiz gece fotoğrafları.
+Pixora karanlıkta tek kare yerine art arda birden çok kare çeker, hareket eden bölgeleri koruyarak birleştirir ve gürültüyü akıllıca azaltır. Sonuç: daha aydınlık, daha temiz gece fotoğrafları.
+
+✨ YILDIZ MODU
+Telefonu tripoda ya da sabit bir yere koyun; Pixora gökyüzünün birkaç uzun pozlamasını çeker, sıcak pikselleri temizler ve temiz bir yıldız fotoğrafında birleştirir. Yalnızca uzun pozlamayı destekleyen telefonlarda görünür.
 
 👤 PORTRE MODU
 Telefonun üzerinde çalışan yapay zekâ derinlik haritası, konuyu arka plandan ayırır ve doğal bir arka plan bulanıklığı uygular.
