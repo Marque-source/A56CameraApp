@@ -1617,8 +1617,8 @@ class Camera2Manager(
 
                 MediaStoreHelper.openOutput(context, uri)?.use { it.write(outputBytes) }
                 try {
-                    // Donanım pikselleri zaten döndürdüyse (etiket "normal") tekrar döndürme etiketi yazma
-                    val exifRotation = ExifHelper.readOrientationDegrees(bytes) ?: req.orientation
+                    // Donanım pikselleri zaten döndürdüyse tekrar döndürme etiketi yazma
+                    val exifRotation = ExifHelper.readOrientationDegrees(bytes) ?: inferJpegRotation(bytes, req.orientation)
                     context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
                         ExifHelper.writeCaptureMetadata(pfd.fileDescriptor, result, req.location, exifRotation)
                     }
@@ -1844,6 +1844,28 @@ class Camera2Manager(
      * [deviceRotation], OrientationEventListener'dan gelen saat yönündeki fiziksel açıdır (0/90/180/270).
      * Arka kamera: (sensör + açı), ön kamera: (sensör − açı) — ön kamera ayna olduğu için yön terslenir.
      */
+    /** Bu kamera donanımı JPEG_ORIENTATION'ı pikselleri döndürerek mi uyguluyor? (dik çekimden öğrenilir) */
+    private var halRotatesJpegPixels: Boolean? = null
+
+    /**
+     * JPEG'de yön etiketi yoksa donanımın pikselleri döndürüp döndürmediğini boyuttan anlar.
+     * Note 10S (AOSP) etiket yazmadan pikselleri dik veriyordu; biz de "90° döndür" etiketi
+     * ekleyince galeride fotoğraflar yan duruyordu. Sensör yatay olduğu için 90/270'te dik
+     * (yükseklik > genişlik) bir JPEG, donanımın zaten döndürdüğü anlamına gelir.
+     */
+    private fun inferJpegRotation(jpeg: ByteArray, requested: Int): Int {
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, o)
+        if (o.outWidth <= 0 || o.outHeight <= 0) return requested
+        if (requested == 90 || requested == 270) {
+            val rotated = o.outHeight > o.outWidth
+            halRotatesJpegPixels = rotated
+            return if (rotated) 0 else requested
+        }
+        // 0/180'de boyut ipucu vermez; dik çekimden öğrenileni kullan
+        return if (requested == 180 && halRotatesJpegPixels == true) 0 else requested
+    }
+
     private fun jpegOrientation(ch: CameraCharacteristics, deviceRotation: Int): Int {
         val sensorOrientation = ch.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
         val rotation = ((deviceRotation % 360) + 360) % 360
