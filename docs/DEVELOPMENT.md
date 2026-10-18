@@ -17,8 +17,8 @@
 
 ```
 app/src/main/
-├── java/com/a56camera/
-│   ├── A56Application.kt              # Uygulama sınıfı (paket adı tarihsel olarak com.a56camera)
+├── java/io/github/marquesource/pixora/
+│   ├── PixoraApplication.kt           # Uygulama sınıfı
 │   ├── CameraActivity.kt             # Ana kamera ekranı (launcher)
 │   ├── SettingsActivity.kt           # Ayarlar
 │   ├── camera/                       # Saf Camera2 katmanı
@@ -30,6 +30,7 @@ app/src/main/
 │   │   ├── ExposureController.kt     # AE / manuel ISO + perde
 │   │   ├── FocusController.kt        # AF / dokunarak odak / manuel odak
 │   │   ├── WhiteBalanceController.kt # AWB / preset / manuel Kelvin
+│   │   ├── YuvFrame.kt               # Burst karesi (YUV düzlemleri + çekim bilgisi)
 │   │   ├── ZoomController.kt         # CONTROL_ZOOM_RATIO / CROP_REGION
 │   │   ├── ExposureBracketingStrategy.kt # Gece/portre burst pozlaması
 │   │   ├── TimeLapseCapture.kt       # Hızlandırılmış kayıt
@@ -41,7 +42,11 @@ app/src/main/
 │   │   ├── TemporalMerge.kt          # Hareket korumalı kare ortalaması
 │   │   ├── SmartDenoiser.kt          # Gürültüye uyarlanan NLM
 │   │   ├── ToneMapHelper.kt          # Renk profilleri, gece tonu, keskinleştirme
-│   │   └── *Engine.kt / SceneOptimizer.kt # LiteRT modelleri
+│   │   ├── NightTone.kt              # Doğrusal ışıkta gece ton eşleme (deneme)
+│   │   ├── YuvConverter.kt           # YUV ↔ OpenCV Mat ↔ Bitmap
+│   │   ├── LinearDngWriter.kt        # İşlenmiş 16-bit doğrusal DNG
+│   │   ├── DebugDump.kt              # Debug sürümde işleme aşamalarını kaydeder
+│   │   └── *Engine.kt / SceneOptimizer.kt # LiteRT modelleri (MiDaS derinlik, Zero-DCE, sahne)
 │   ├── ui/views/
 │   │   ├── Camera2PreviewView.kt     # TextureView önizleme
 │   │   ├── ModeSelector.kt           # Yatay mod seçici
@@ -54,7 +59,8 @@ app/src/main/
 │       ├── MediaStoreHelper.kt       # DCIM/Camera kaydı (JPEG/DNG/video)
 │       ├── DngHelper.kt              # DngCreator ile RAW → DNG
 │       ├── ExifHelper.kt             # CaptureResult → EXIF + GPS
-│       └── HistogramCalculator.kt    # Önizleme karesi → RGB/Luma histogram
+│       ├── HistogramCalculator.kt    # Önizleme karesi → RGB/Luma histogram
+│       └── SamsungVendorTagsExplorer.kt # Debug: Samsung'a özel kamera etiketlerini listeler
 └── res/                              # Layout, drawable, values (Türkçe)
 ```
 

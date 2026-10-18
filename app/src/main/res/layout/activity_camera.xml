@@ -8,7 +8,7 @@
     android:background="@color/black">
 
     <!-- Kamera önizlemesi (Camera2 / TextureView) -->
-    <com.a56camera.ui.views.Camera2PreviewView
+    <io.github.marquesource.pixora.ui.views.Camera2PreviewView
         android:id="@+id/previewView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -16,7 +16,7 @@
         app:layout_constraintBottom_toBottomOf="parent" />
 
     <!-- Izgara katmanı -->
-    <com.a56camera.ui.views.GridOverlayView
+    <io.github.marquesource.pixora.ui.views.GridOverlayView
         android:id="@+id/gridOverlay"
         android:layout_width="0dp"
         android:layout_height="0dp"
@@ -27,7 +27,7 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- Odak halkası -->
-    <com.a56camera.ui.views.FocusRingView
+    <io.github.marquesource.pixora.ui.views.FocusRingView
         android:id="@+id/focusRing"
         android:layout_width="0dp"
         android:layout_height="0dp"
@@ -37,7 +37,7 @@
         app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- Histogram -->
-    <com.a56camera.ui.views.HistogramView
+    <io.github.marquesource.pixora.ui.views.HistogramView
         android:id="@+id/histogram"
         android:layout_width="120dp"
         android:layout_height="70dp"
@@ -265,7 +265,7 @@
             android:overScrollMode="never"
             android:paddingVertical="16dp">
 
-            <com.a56camera.ui.views.ModeSelector
+            <io.github.marquesource.pixora.ui.views.ModeSelector
                 android:id="@+id/modeContainer"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

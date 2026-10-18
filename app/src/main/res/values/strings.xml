@@ -7,6 +7,7 @@
     <string name="mode_video">VİDEO</string>
     <string name="mode_pro">PRO</string>
     <string name="mode_night">GECE</string>
+    <string name="mode_astro">YILDIZ</string>
     <string name="mode_portrait">PORTRE</string>
     <string name="mode_panorama">PANORAMA</string>
     <string name="mode_timelapse">HIZLANDIRILMIŞ</string>

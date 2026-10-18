@@ -1,0 +1,155 @@
+package io.github.marquesource.pixora
+
+import android.Manifest
+import android.graphics.Rect
+import android.graphics.RectF
+import io.github.marquesource.pixora.camera.ExposureController
+import io.github.marquesource.pixora.camera.WhiteBalanceController
+import io.github.marquesource.pixora.utils.Camera2Utils
+import io.github.marquesource.pixora.utils.ExifHelper
+import io.github.marquesource.pixora.utils.PermissionUtils
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+/** Kamera mantığı için birim testleri (telefon gerektirmez). */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class CameraLogicTest {
+
+    private val array = Rect(0, 0, 4080, 3060)              // 4:3 yatay sensör
+    private val screen = RectF(0f, 0f, 1080f, 1440f)          // dikey önizleme alanı
+
+    // ---------- Dokunarak odak eşlemesi ----------
+
+    @Test fun arkaKamera_ekranUstOrtasi_sensorSolOrtasi() {
+        val p = Camera2Utils.mapViewToSensor(540f, 0f, screen, 90, false, array, 1f, 4f / 3f)
+        assertEquals(0, p.x)
+        assertEquals(1530.0, p.y.toDouble(), 2.0)
+    }
+
+    @Test fun arkaKamera_ekranSagOrtasi_sensorUstOrtasi() {
+        // Sensör görüntüsü saat yönünde 90° döndürülerek gösterilir: sensörün üst kenarı ekranın sağına gelir
+        val p = Camera2Utils.mapViewToSensor(1080f, 720f, screen, 90, false, array, 1f, 4f / 3f)
+        assertEquals(2040.0, p.x.toDouble(), 2.0)
+        assertEquals(0, p.y)
+    }
+
+    @Test fun onKamera_aynaliVe270Derece() {
+        // Ön kamera (270°, aynalı): ekranın üst ortası sensörün sağ ortasına düşer
+        val p = Camera2Utils.mapViewToSensor(540f, 0f, screen, 270, true, array, 1f, 4f / 3f)
+        assertEquals(4079, p.x)
+        assertEquals(1530.0, p.y.toDouble(), 2.0)
+    }
+
+    @Test fun zoom2x_gorunenBolgeyeEslenir() {
+        val p = Camera2Utils.mapViewToSensor(540f, 0f, screen, 90, false, array, 2f, 4f / 3f)
+        assertEquals(1020.0, p.x.toDouble(), 2.0)    // 2x'te görünen bölge sensörün ortadaki yarısı
+        assertEquals(1530.0, p.y.toDouble(), 2.0)
+    }
+
+    @Test fun akis16_9_ustAltKirpilmisSensoreEslenir() {
+        // 16:9 akış 4:3 sensörün ortadaki bandını gösterir (yükseklik 4080/1.777 ≈ 2295)
+        val p = Camera2Utils.mapViewToSensor(0f, 720f, screen, 90, false, array, 1f, 16f / 9f)
+        assertEquals(2678.0, p.y.toDouble(), 3.0)
+    }
+
+    @Test fun letterbox_siyahKenarlarHesabaKatilir() {
+        val content = RectF(0f, 180f, 1080f, 1260f)   // içerik ekranın ortasında
+        val p = Camera2Utils.mapViewToSensor(540f, 180f, content, 90, false, array, 1f, 4f / 3f)
+        assertEquals(0, p.x)
+    }
+
+    // ---------- Pro mod pozlama ----------
+
+    @Test fun yalnizcaIso_manuelPozlamayiAcarVePerdeyiHesaplar() {
+        val e = ExposureController().apply { manualSupported = true }
+        e.setIsoFromProgress(0.5f)
+        assertTrue(e.isManual())
+        val (iso, exp) = e.effectiveManualValues()
+        // Ölçüm yokken varsayılan ışık miktarı: ISO 100 × 1/60 sn
+        assertEquals(100.0 * 16_666_666 / iso, exp.toDouble(), exp * 0.02)
+    }
+
+    @Test fun yalnizcaPerde_isoHesaplanir() {
+        val e = ExposureController().apply { manualSupported = true }
+        e.manualExposureNanos = 8_333_333L   // 1/120 sn
+        assertTrue(e.isManual())
+        assertEquals(200, e.effectiveManualValues().first)
+    }
+
+    @Test fun telefonIzinVermiyorsa_manuelPozlamaDevreyeGirmez() {
+        // Galaxy A56: SENSOR_SENSITIVITY / SENSOR_EXPOSURE_TIME istek anahtarları yok
+        val e = ExposureController()
+        e.setIsoFromProgress(0.5f)
+        e.manualExposureNanos = 8_333_333L
+        assertFalse(e.isManual())
+    }
+
+    // ---------- Beyaz dengesi ----------
+
+    @Test fun kelvin_enYakinHazirAyaraEslenir() {
+        val wb = WhiteBalanceController()
+        assertEquals(WhiteBalanceController.Preset.INCANDESCENT, wb.presetForKelvin(2600))
+        assertEquals(WhiteBalanceController.Preset.DAYLIGHT, wb.presetForKelvin(5500))
+        assertEquals(WhiteBalanceController.Preset.SHADE, wb.presetForKelvin(7500))
+    }
+
+    // ---------- İzinler ----------
+
+    @Test fun yalnizcaKameraIzniZorunlu() {
+        assertEquals(listOf(Manifest.permission.CAMERA), PermissionUtils.requiredPermissions().toList())
+    }
+
+    // ---------- EXIF ----------
+
+    @Test fun pozlamaSuresiRasyonelYazilir() {
+        assertEquals("1/250", ExifHelper.exposureRational(4_000_000L))
+        assertEquals("1/4000", ExifHelper.exposureRational(250_000L))
+        assertEquals("2000/1000", ExifHelper.exposureRational(2_000_000_000L))
+    }
+
+    // ---------- Kamera seçimi (gerçek telefon dökümlerinden) ----------
+
+    private fun cam(id: String, facing: Camera2Utils.Facing, eq: Float, px: Long, logical: Boolean = false,
+                    raw: Boolean = false, level: Int = 1, minZoom: Float = 1f, usable: Boolean = true) =
+        Camera2Utils.CameraInfo(
+            id = id, facing = facing, focalLength = eq / 5f, isLogical = logical, physicalIds = emptySet(),
+            hardwareLevel = level, supportsRaw = raw, minFocusDistance = 0f, isoRange = null, exposureRange = null,
+            maxZoom = 8f, activeArraySize = null, physicalSize = null,
+            equivFocalMm = eq, pixelCount = px, minZoomRatio = minZoom, isUsable = usable
+        )
+
+    @Test fun redmiNote10S_anaSensorSecilir_birlesikKameraDegil() {
+        val B = Camera2Utils.Facing.BACK
+        val cams = listOf(
+            cam("0", B, 25.6f, 4624L * 3472, raw = true, level = 3),
+            cam("2", B, 9.5f, 3280L * 2464, raw = true, level = 3),
+            cam("4", B, 23.2f, 1600L * 1200, raw = true, level = 3),   // makro
+            cam("5", B, 22.1f, 4624L * 3472, logical = true, level = 0)  // ana + derinlik
+        )
+        assertEquals("0", Camera2Utils.mainCamera(cams, B)?.id)
+        assertEquals("2", Camera2Utils.ultraWideCamera(cams)?.id)
+    }
+
+    @Test fun galaxyA56_anaVeUltraGenis() {
+        val B = Camera2Utils.Facing.BACK; val F = Camera2Utils.Facing.FRONT
+        val cams = listOf(
+            cam("0", B, 23.5f, 4080L * 3060), cam("1", F, 24.6f, 4000L * 3000),
+            cam("2", B, 13.4f, 4000L * 3000), cam("3", F, 29.2f, 3472L * 2388)
+        )
+        assertEquals("0", Camera2Utils.mainCamera(cams, B)?.id)
+        assertEquals("1", Camera2Utils.mainCamera(cams, F)?.id)
+        assertEquals("2", Camera2Utils.ultraWideCamera(cams)?.id)
+    }
+
+    @Test fun ultraGenisiKapsayanMantiksalKameraTercihEdilir() {
+        val B = Camera2Utils.Facing.BACK
+        val cams = listOf(cam("0", B, 24f, 12_000_000L), cam("9", B, 24f, 12_000_000L, logical = true, minZoom = 0.6f))
+        assertEquals("9", Camera2Utils.mainCamera(cams, B)?.id)
+    }
+}

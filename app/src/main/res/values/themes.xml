@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Ana tema — Material Design 3, tam siyah, ActionBar YOK -->
-    <style name="Theme.A56Camera" parent="Theme.Material3.Dark.NoActionBar">
+    <style name="Theme.Pixora" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/accent_blue</item>
         <item name="colorOnPrimary">@color/black</item>
         <item name="colorSecondary">@color/accent_yellow</item>
@@ -18,7 +18,7 @@
     </style>
 
     <!-- Tam ekran kamera teması (ActionBar YOK) -->
-    <style name="Theme.A56Camera.Fullscreen" parent="Theme.A56Camera">
+    <style name="Theme.Pixora.Fullscreen" parent="Theme.Pixora">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>

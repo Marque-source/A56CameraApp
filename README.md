@@ -22,7 +22,8 @@ hesap yok, internet izni yok: fotoğrafların telefonundan hiç çıkmaz.
 
 | | |
 |---|---|
-| 🌙 **Gece** | Tek kare yerine art arda 5 kare çeker, hareketli bölgeleri koruyarak birleştirir, gürültüyü akıllıca azaltır. |
+| 🌙 **Gece** | Tek kare yerine art arda kareler çeker, hareketli bölgeleri koruyarak birleştirir, gürültüyü akıllıca azaltır. Destekleyen telefonlarda ham (RAW) kareleri birleştirir. |
+| ✨ **Yıldız** | Telefon sabitken saniyeler süren uzun pozlamalarla gökyüzünü çeker, sıcak pikselleri temizler. Yalnızca uzun pozlamayı destekleyen telefonlarda görünür. |
 | 👤 **Portre** | Telefonda çalışan yapay zekâ derinlik haritasıyla doğal arka plan bulanıklığı. |
 | 🎛️ **Pro** | Pozlama (EV), beyaz dengesi, renk profilleri (Doğal, Monokrom, Flat Log), canlı histogram. Telefon izin veriyorsa ISO, enstantane ve elle odak. |
 | 🌄 **Panorama** | Jiroskop rehberliğinde çek, Pixora otomatik birleştirsin. |
@@ -52,7 +53,8 @@ permission: your photos never leave your phone.
 
 | | |
 |---|---|
-| 🌙 **Night** | Captures a burst of 5 frames instead of one, merges them while protecting moving areas, and removes noise intelligently. |
+| 🌙 **Night** | Captures a burst of frames instead of one, merges them while protecting moving areas, and removes noise intelligently. Merges RAW frames on supported phones. |
+| ✨ **Astro** | With the phone held still, takes multi-second long exposures of the night sky and removes hot pixels. Shown only on phones that support long exposures. |
 | 👤 **Portrait** | Natural background blur powered by an on-device AI depth map. |
 | 🎛️ **Pro** | Exposure (EV), white balance, color profiles (Natural, Monochrome, Flat Log), live histogram. ISO, shutter and manual focus where your phone allows. |
 | 🌄 **Panorama** | Gyroscope-guided capture with automatic stitching. |
