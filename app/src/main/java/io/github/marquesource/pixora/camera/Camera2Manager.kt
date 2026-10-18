@@ -734,7 +734,112 @@ class Camera2Manager(
     ) {
         val ch = characteristics ?: return onError()
         if (!supportsAstro() || imageReaders?.rawSurface() == null) return onError()
-        captureNightRaw(ch, jpegOrientation(ch, deviceRotation), location, onProgress, onSaved, onError, astro = true)
+        val orientation = jpegOrientation(ch, deviceRotation)
+        val isoRange = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: android.util.Range(100, 3200)
+        val mIso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 800
+        val debugForced = io.github.marquesource.pixora.BuildConfig.DEBUG &&
+            (debugAstroExpMs > 0 || debugAstroIso > 0 || debugNightEv != 0f)
+        // Önizleme ~0,1 sn'de takılı kalıyor; ISO sınırdaysa sahnenin gerçekte ne kadar karanlık olduğu
+        // bilinmez. Tek bir 1 sn'lik deneme RAW karesiyle ölç: gökyüzünde 10 sn, loş odada 1-2 sn çıkar
+        // (ilk testte loş oda 10 sn/ISO 1600 ile çekilip gündüz gibi parladı).
+        if (mIso >= isoRange.upper * 0.5 && !debugForced) {
+            mainPost { onProgress?.invoke("Işık ölçülüyor...") }
+            probeAstroExposure(ch, onPlan = { plan ->
+                captureNightRaw(ch, orientation, location, onProgress, onSaved, onError, astro = true, astroPlan = plan)
+            }, onFail = {
+                Log.w(TAG, "Yıldız ölçüm karesi alınamadı, varsayılan plan")
+                captureNightRaw(ch, orientation, location, onProgress, onSaved, onError, astro = true)
+            })
+            return
+        }
+        captureNightRaw(ch, orientation, location, onProgress, onSaved, onError, astro = true)
+    }
+
+    /** Yıldız: toplam ışık miktarından (süre·ISO) plan — önce süre uzar, ISO 100'ün altına inmez, 1600'ü aşmaz. */
+    private fun astroPlanFromTotal(ch: CameraCharacteristics, total: Double): Pair<Long, Int> {
+        val isoRange = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: android.util.Range(100, 3200)
+        val expRange = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: android.util.Range(100_000L, 1_000_000_000L)
+        val frameMax = ch.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION) ?: expRange.upper
+        val cap = minOf(expRange.upper, frameMax, ASTRO_MAX_EXP_NS).toDouble()
+        val isoMin = maxOf(isoRange.lower, 100)
+        val isoMax = ASTRO_ISO.coerceIn(isoRange.lower, isoRange.upper)
+        val iso = (total / cap).coerceIn(isoMin.toDouble(), isoMax.toDouble()).toInt()
+        val exp = (total / iso).coerceIn(expRange.lower.toDouble(), cap).toLong()
+        return exp to iso
+    }
+
+    /**
+     * 1 sn / ISO 1600 tek RAW deneme karesi çeker, parlaklığına bakıp yıldız planını çıkarır:
+     * en parlak %1 kırpılmasın (≤0,85), ortalama gereğinden fazla yükselmesin (≤0,10).
+     */
+    private fun probeAstroExposure(ch: CameraCharacteristics, onPlan: (Pair<Long, Int>) -> Unit, onFail: () -> Unit) {
+        val device = cameraDevice ?: return onFail()
+        val readers = imageReaders ?: return onFail()
+        val rawSurface = readers.rawSurface() ?: return onFail()
+        val isoRange = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: android.util.Range(100, 3200)
+        val expRange = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: android.util.Range(100_000L, 1_000_000_000L)
+        val probeIso = ASTRO_ISO.coerceIn(isoRange.lower, isoRange.upper)
+        val probeExp = minOf(1_000_000_000L, expRange.upper)
+        val black = ch.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)?.getOffsetForIndex(0, 0)?.toDouble() ?: 64.0
+        val white = (ch.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023).toDouble()
+        val done = AtomicBoolean(false)
+
+        fun restore() = readers.setRawImageAvailableListener { image -> onRawAvailable(image) }
+        fun fail() { if (done.getAndSet(true)) return; restore(); onFail() }
+
+        readers.setRawImageAvailableListener { image ->
+            if (done.getAndSet(true)) { image.close(); return@setRawImageAvailableListener }
+            try {
+                val plane = image.planes[0]
+                val sb = plane.buffer.order(java.nio.ByteOrder.nativeOrder()).asShortBuffer()
+                val rowShorts = plane.rowStride / 2
+                val hist = IntArray(1024)
+                var sum = 0.0; var cnt = 0
+                // Seyrek örnekle (her 8. satır/sütun): CFA renkleri karışır, parlaklık ölçümü için yeterli
+                var r = 0
+                while (r < image.height) {
+                    var c = 0
+                    while (c < image.width) {
+                        val v = ((sb.get(r * rowShorts + c).toInt() and 0xFFFF) - black) / (white - black)
+                        val x = v.coerceIn(0.0, 1.0)
+                        hist[(x * 1023).toInt()]++
+                        sum += x; cnt++
+                        c += 8
+                    }
+                    r += 8
+                }
+                image.close()
+                restore()
+                val mean = sum / cnt.coerceAtLeast(1)
+                var acc = 0; var p99 = 1.0
+                for (i in 0 until 1024) { acc += hist[i]; if (acc >= cnt * 0.99) { p99 = i / 1023.0; break } }
+                val k = minOf(0.85 / p99.coerceAtLeast(1e-4), 0.10 / mean.coerceAtLeast(1e-5))
+                val plan = astroPlanFromTotal(ch, probeExp.toDouble() * probeIso * k)
+                Log.i(TAG, "✨ Yıldız ölçümü: ortalama=%.4f p99=%.4f k=%.2f → %d ms, ISO %d"
+                    .format(mean, p99, k, plan.first / 1_000_000, plan.second))
+                onPlan(plan)
+            } catch (e: Throwable) {
+                Log.e(TAG, "Yıldız ölçüm hatası", e)
+                try { image.close() } catch (_: Throwable) {}
+                done.set(false); fail()
+            }
+        }
+
+        val req = device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+            addTarget(rawSurface)
+            set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+            set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            set(CaptureRequest.SENSOR_SENSITIVITY, probeIso)
+            set(CaptureRequest.SENSOR_EXPOSURE_TIME, probeExp)
+            set(CaptureRequest.SENSOR_FRAME_DURATION, probeExp)
+            zoom.applyTo(this)
+        }.build()
+        bgHandler?.postDelayed({ fail() }, 4000L + probeExp / 1_000_000L)
+        try {
+            sessionManager?.capture(req, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) { fail() }
+            }) ?: fail()
+        } catch (e: Exception) { fail() }
     }
 
     private fun captureNightYuv(
@@ -817,7 +922,8 @@ class Camera2Manager(
         onProgress: ((String) -> Unit)?,
         onSaved: (Uri) -> Unit,
         onError: () -> Unit,
-        astro: Boolean = false
+        astro: Boolean = false,
+        astroPlan: Pair<Long, Int>? = null
     ) {
         val device = cameraDevice ?: return onError()
         val readers = imageReaders ?: return onError()
@@ -839,12 +945,11 @@ class Camera2Manager(
             // Önizleme ~0,1 sn'de takılı kalır; gerçekten karanlıksa (ölçüm sınırda) en uzun süre + ISO 1600.
             // Aydınlık sahnede (ay, şehir ışıkları, gündüz testi) ölçülen ışık korunur, yalnız süre uzar.
             val cap = minOf(expRange.upper, frameMax, ASTRO_MAX_EXP_NS).toDouble()
-            val astroIso = ASTRO_ISO.coerceIn(isoRange.lower, isoRange.upper)
-            val metered = target / astroIso
-            var e = metered.coerceIn(expRange.lower.toDouble(), cap)
-            val atLimit = mIso >= isoRange.upper * 0.5 && debugNightScale() == 1.0
-            if (atLimit) e = cap
-            var i = if (atLimit) astroIso else (target / e).toInt().coerceIn(isoRange.lower, astroIso)
+            val atLimit = astroPlan == null && mIso >= isoRange.upper * 0.5 && debugNightScale() == 1.0
+            val plan = astroPlan ?: if (atLimit) cap.toLong() to ASTRO_ISO.coerceIn(isoRange.lower, isoRange.upper)
+                else astroPlanFromTotal(ch, target)
+            var e = plan.first.toDouble()
+            var i = plan.second
             if (io.github.marquesource.pixora.BuildConfig.DEBUG && debugAstroExpMs > 0) {
                 e = (debugAstroExpMs * 1_000_000.0).coerceIn(expRange.lower.toDouble(), cap)
             }
@@ -1035,7 +1140,7 @@ class Camera2Manager(
             mainPost { if (uri != null) onSaved(uri) else onError() }
             // OpenCV Mat'leri yerel bellekte; Java çöp toplayıcısı büyüklüklerini görmediği için
             // yüzlerce MB'lık geçici tamponlar geç serbest kalıyordu (testte 1,2 GB). Hemen topla.
-            System.gc()
+            System.gc(); System.runFinalization(); System.gc()
         } catch (e: Throwable) {
             Log.e(TAG, "RAW gece işleme hatası", e)
             pairs.forEach { try { it.first.release() } catch (_: Throwable) {} }
