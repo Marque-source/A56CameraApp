@@ -14,7 +14,9 @@ object ExposureBracketingStrategy {
     data class BracketSettings(
         val baseIso: Int,
         val baseExposureNs: Long,
-        val evShifts: List<Float>
+        val evShifts: List<Float>,
+        /** Sahne karanlık mı (çağıran gece istemese de)? Elle pozlamada uzun süreye izin verilir. */
+        val isNight: Boolean = false
     )
 
     fun computeForScene(result: TotalCaptureResult?, forceNight: Boolean = false): BracketSettings {
@@ -28,7 +30,7 @@ object ExposureBracketingStrategy {
         val iso = if (isNight) rawIso.coerceIn(800, 2400) else rawIso
         val exp = if (isNight) rawExp.coerceIn(45_000_000L, 90_000_000L) else rawExp
 
-        return BracketSettings(iso, exp, getEvShifts(isNight))
+        return BracketSettings(iso, exp, getEvShifts(isNight), isNight)
     }
 
     // Gece: 5 kare AYNI pozlamayla çekilir ve ortalanır. Gece birleştirmesi (TemporalMerge)
@@ -79,7 +81,12 @@ object ExposureBracketingStrategy {
             val expForMinIso = target / isoRange.lower
             exp = minOf(expForMinIso, maxExp.toDouble())
         }
-        exp = exp.coerceIn(expRange.lower.toDouble(), maxExp.toDouble())
+        // ISO tavanına takılınca kareyi karanlık bırakmak yerine süreyi uzat (sınır: elde tutulabilir süre).
+        // Redmi Note 10S'de portre kareleri ISO 6400 tavanında 33 ms ile ~6 kat az pozlanıp simsiyah çıkıyordu.
+        val hardCapNs = minOf(expRange.upper, if (isNight) 125_000_000L else 66_000_000L)
+        val expForMaxIso = target / isoRange.upper
+        if (expForMaxIso > exp) exp = minOf(expForMaxIso, hardCapNs.toDouble())
+        exp = exp.coerceIn(expRange.lower.toDouble(), maxOf(maxExp, hardCapNs).toDouble())
         val iso = (target / exp).roundToInt().coerceIn(isoRange.lower, isoRange.upper)
 
         val expNs = exp.toLong()

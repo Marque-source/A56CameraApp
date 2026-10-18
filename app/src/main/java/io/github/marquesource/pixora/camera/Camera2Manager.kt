@@ -726,6 +726,13 @@ class Camera2Manager(
         val orientation = jpegOrientation(ch, deviceRotation)
 
         Log.d(TAG, "Portre çekimi başlıyor: YUV Burst + MiDaS 3D NPU Bokeh")
+        // Çok karanlıkta derinlik haritası konuyu arka plandan ayıramıyor ve bütün kareyi bulanıklaştırıyor
+        // (A56 ve Note 10S testleri). O zaman bulanıklık uygulanmaz, temiz bir fotoğraf kaydedilir.
+        val darkScene = lastResult?.let {
+            (it.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0) >= 1600 ||
+                (it.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L) >= 50_000_000L
+        } ?: false
+        if (darkScene) mainPost { onProgress?.invoke("Ortam çok karanlık: arka plan bulanıklığı kapalı") }
         onProgress?.invoke("Portre çekiliyor...")
 
         captureBracketedBurst(
@@ -740,7 +747,7 @@ class Camera2Manager(
                             denoiseEnabled = true,
                             sharpenEnabled = true,
                             hdrEnabled = true,
-                            portraitBokehEnabled = true,
+                            portraitBokehEnabled = !darkScene,
                             expertRawEnabled = rawEnabled,
                             saveToGallery = true
                         )
@@ -929,7 +936,7 @@ class Camera2Manager(
             // Doğal ve temiz Camera2 pozlaması: Samsung 3A motorunu kör etmek yerine
             // sahneyi doğru ölçmesine izin veriyoruz, OIS ve FAST NR ile stabil burst alıyoruz.
             if (useManualBracket) {
-                ExposureBracketingStrategy.applyManualEvShift(b, ch, meteredIso!!, meteredExp!!, ev, isNight)
+                ExposureBracketingStrategy.applyManualEvShift(b, ch, meteredIso!!, meteredExp!!, ev, isNight || bracket.isNight)
             } else {
                 b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 ExposureBracketingStrategy.applyEvShift(b, ch, ev)

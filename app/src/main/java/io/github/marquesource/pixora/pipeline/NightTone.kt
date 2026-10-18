@@ -25,21 +25,40 @@ import kotlin.math.ln
 object NightTone {
 
     /** Hedef orta ton (doğrusal). 0.18 gündüz gibi; gece hissi için biraz altı. */
-    const val TARGET_KEY = 0.13
-    const val MAX_GAIN = 4.0
-    const val SATURATION = 0.88
+    const val TARGET_KEY = 0.18
+    const val MAX_GAIN = 8.0
+    const val SATURATION = 0.8
+    const val GRAY_WORLD = 0.5
 
     /**
      * @param src 8UC3 veya 16UC3 BGR (sRGB kodlu)
      * @return 8UC3 BGR
      */
-    fun render(src: Mat, targetKey: Double = TARGET_KEY, maxGain: Double = MAX_GAIN): Mat {
+    fun render(
+        src: Mat,
+        targetKey: Double = TARGET_KEY,
+        maxGain: Double = MAX_GAIN,
+        saturation: Double = SATURATION,
+        grayWorld: Double = GRAY_WORLD
+    ): Mat {
         val scale = if (src.depth() == CvType.CV_16U) 1.0 / 65535.0 else 1.0 / 255.0
         val f = Mat()
         src.convertTo(f, CvType.CV_32FC3, scale)
 
         // sRGB → doğrusal (2.2 gama yaklaşıklığı; ISP çıktısı için yeterli)
         Core.pow(f, 2.2, f)
+
+        // Karanlıkta telefonun beyaz dengesi çoğu zaman tutmuyor (burst kareleri mor/yeşil kalıyor).
+        // Gri dünya varsayımına doğru KISMİ düzeltme: ortam ışığının rengi korunur, aşırı sapma alınır.
+        if (grayWorld > 0.0) {
+            val m = Core.mean(f).`val`
+            val g = (m[0] + m[1] + m[2]) / 3.0
+            val gains = DoubleArray(3) { c ->
+                val full = if (m[c] > 1e-6) g / m[c] else 1.0
+                Math.pow(full, grayWorld).coerceIn(0.7, 1.6)
+            }
+            Core.multiply(f, Scalar(gains[0], gains[1], gains[2]), f)
+        }
 
         val y = luminance(f)
         val stats = sceneStats(y)
@@ -67,7 +86,7 @@ object NightTone {
         val yt3 = Mat(); Core.merge(listOf(yt, yt, yt), yt3)
         Core.multiply(f, ratio3, f)
         Core.subtract(f, yt3, f)
-        Core.multiply(f, Scalar(SATURATION, SATURATION, SATURATION), f)
+        Core.multiply(f, Scalar(saturation, saturation, saturation), f)
         Core.add(f, yt3, f)
         Core.min(f, Scalar(1.0, 1.0, 1.0), f)
         Core.max(f, Scalar(0.0, 0.0, 0.0), f)
