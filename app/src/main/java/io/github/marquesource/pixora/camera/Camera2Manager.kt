@@ -770,7 +770,7 @@ class Camera2Manager(
 
     /**
      * 1 sn / ISO 1600 tek RAW deneme karesi çeker, parlaklığına bakıp yıldız planını çıkarır:
-     * en parlak %1 kırpılmasın (≤0,85), ortalama gereğinden fazla yükselmesin (≤0,10).
+     * en parlak %1 kırpılmasın (≤0,85), ortalama aydınlık kalsın ama gereğinden fazla yükselmesin (≤0,25; kullanıcı aydınlık sonucu beğendi).
      */
     private fun probeAstroExposure(ch: CameraCharacteristics, onPlan: (Pair<Long, Int>) -> Unit, onFail: () -> Unit) {
         val device = cameraDevice ?: return onFail()
@@ -813,7 +813,7 @@ class Camera2Manager(
                 val mean = sum / cnt.coerceAtLeast(1)
                 var acc = 0; var p99 = 1.0
                 for (i in 0 until 1024) { acc += hist[i]; if (acc >= cnt * 0.99) { p99 = i / 1023.0; break } }
-                val k = minOf(0.85 / p99.coerceAtLeast(1e-4), 0.10 / mean.coerceAtLeast(1e-5))
+                val k = minOf(0.85 / p99.coerceAtLeast(1e-4), 0.25 / mean.coerceAtLeast(1e-5))
                 val plan = astroPlanFromTotal(ch, probeExp.toDouble() * probeIso * k)
                 Log.i(TAG, "✨ Yıldız ölçümü: ortalama=%.4f p99=%.4f k=%.2f → %d ms, ISO %d"
                     .format(mean, p99, k, plan.first / 1_000_000, plan.second))
