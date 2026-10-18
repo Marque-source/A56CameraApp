@@ -76,6 +76,26 @@ class ImageProcessingPipeline(private val context: Context) {
 
         Log.d(TAG, "Pipeline başlıyor: ${frames.size} kare, ISO=$iso, profil=${config.colorProfile.name}")
 
+        DebugDump.prune(context)
+        val dump = DebugDump(context, config.colorProfile.name.lowercase())
+        if (dump.enabled) {
+            dump.text("bilgi.txt", buildString {
+                appendLine("kare=${frames.size} iso=$iso profil=${config.colorProfile.name}")
+                appendLine("pozlama_ns=${referenceResult.get(CaptureResult.SENSOR_EXPOSURE_TIME)}")
+                appendLine("ae=${referenceResult.get(CaptureResult.CONTROL_AE_STATE)} awb=${referenceResult.get(CaptureResult.CONTROL_AWB_STATE)}")
+                appendLine("nr=${referenceResult.get(CaptureResult.NOISE_REDUCTION_MODE)} edge=${referenceResult.get(CaptureResult.EDGE_MODE)}")
+                appendLine("cihaz=${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                appendLine("bokeh=${config.portraitBokehEnabled} zeroDce=${config.lowLightEnhanceEnabled}")
+            })
+            frames.forEachIndexed { i, (f, _) ->
+                if (i < 5) {
+                    val rgb = YuvConverter.toRgbMat(f); val b = org.opencv.core.Mat()
+                    org.opencv.imgproc.Imgproc.cvtColor(rgb, b, org.opencv.imgproc.Imgproc.COLOR_RGB2BGR)
+                    dump.mat("0_kare$i", b); rgb.release(); b.release()
+                }
+            }
+        }
+
         // ──── Adım 1: Multi-frame ORB Hizalama & Temporal Fusion (Native BGR Mat) ────
         onProgress?.invoke("HDR birleştirme ve hizalama...")
         val mergeOutput = if (config.hdrEnabled && frames.size > 1) {
@@ -94,6 +114,15 @@ class ImageProcessingPipeline(private val context: Context) {
         }
         val mergedMat = mergeOutput.mergedMat8u
         val rawMat16u = mergeOutput.rawMat16u
+        dump.mat("1_birlesik", mergedMat)
+        if (dump.enabled && config.colorProfile == ToneMapHelper.ColorProfile.NIGHT) {
+            // Karşılaştırma için yeni gece ton yolu (kaydedilen fotoğrafı etkilemez)
+            val alt = NightTone.render(mergedMat)
+            val altDen = denoiser.denoise(alt, iso)
+            val altOut = ToneMapHelper.applyAdaptiveAcutance(altDen, strength = 0.15, haloThreshold = 24.0, noiseFloor = 4.0)
+            dump.mat("9_yeni_gece_ton", altOut)
+            alt.release(); if (altDen !== alt) altDen.release(); altOut.release()
+        }
 
         // ──── Adım 2: Akıllı Denoise (Doğrudan Mat üzerinde - Sıfır Ara Bitmap Çevrimi!) ────
         onProgress?.invoke("Gürültü azaltma...")
@@ -106,6 +135,7 @@ class ImageProcessingPipeline(private val context: Context) {
             mergedMat
         }
         val tDenoise = System.currentTimeMillis() - tDen0
+        dump.mat("2_gurultu_azaltma", denoisedMat)
 
         // ──── Adım 3: Renk Profili & Ton Haritalama (Doğrudan Mat üzerinde) ────
         onProgress?.invoke("Renk işleme...")
@@ -118,6 +148,7 @@ class ImageProcessingPipeline(private val context: Context) {
             denoisedMat
         }
         val tToneMap = System.currentTimeMillis() - tTm0
+        dump.mat("3_renk_ton", coloredMat)
 
         // ──── Adım 4: Adaptive Edge-Aware Akütans (Halo-Free Doğal Optik Keskinlik) ────
         val tAcu0 = System.currentTimeMillis()
@@ -135,6 +166,7 @@ class ImageProcessingPipeline(private val context: Context) {
             coloredMat
         }
         val tAcutance = System.currentTimeMillis() - tAcu0
+        dump.mat("4_keskinlik", finalMat)
 
         // Not: Eskiden burada "Smart Grain" ile bilerek rastgele gren ekleniyordu (gece modunda her zaman,
         // diğer modlarda ISO 800+). Kumlanma şikayetinin doğrudan nedeni olduğu için kaldırıldı.
@@ -194,6 +226,12 @@ class ImageProcessingPipeline(private val context: Context) {
 
         // Not: Eskiden 2x ve üzeri zoomda burada "Real-ESRGAN x4 süper çözünürlük" çalışıyordu. Model 128x128
         // girdi aldığı için BÜTÜN fotoğrafı 128x128'e küçültüp 512x512 olarak kaydediyordu. Kaldırıldı.
+
+        if (dump.enabled) {
+            val fm = org.opencv.core.Mat(); org.opencv.android.Utils.bitmapToMat(currentBitmap, fm)
+            org.opencv.imgproc.Imgproc.cvtColor(fm, fm, org.opencv.imgproc.Imgproc.COLOR_RGBA2BGR)
+            dump.mat("5_son", fm); fm.release()
+        }
 
         var savedRawUri: Uri? = null
         try {

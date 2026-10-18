@@ -112,4 +112,44 @@ class CameraLogicTest {
         assertEquals("1/4000", ExifHelper.exposureRational(250_000L))
         assertEquals("2000/1000", ExifHelper.exposureRational(2_000_000_000L))
     }
+
+    // ---------- Kamera seçimi (gerçek telefon dökümlerinden) ----------
+
+    private fun cam(id: String, facing: Camera2Utils.Facing, eq: Float, px: Long, logical: Boolean = false,
+                    raw: Boolean = false, level: Int = 1, minZoom: Float = 1f, usable: Boolean = true) =
+        Camera2Utils.CameraInfo(
+            id = id, facing = facing, focalLength = eq / 5f, isLogical = logical, physicalIds = emptySet(),
+            hardwareLevel = level, supportsRaw = raw, minFocusDistance = 0f, isoRange = null, exposureRange = null,
+            maxZoom = 8f, activeArraySize = null, physicalSize = null,
+            equivFocalMm = eq, pixelCount = px, minZoomRatio = minZoom, isUsable = usable
+        )
+
+    @Test fun redmiNote10S_anaSensorSecilir_birlesikKameraDegil() {
+        val B = Camera2Utils.Facing.BACK
+        val cams = listOf(
+            cam("0", B, 25.6f, 4624L * 3472, raw = true, level = 3),
+            cam("2", B, 9.5f, 3280L * 2464, raw = true, level = 3),
+            cam("4", B, 23.2f, 1600L * 1200, raw = true, level = 3),   // makro
+            cam("5", B, 22.1f, 4624L * 3472, logical = true, level = 0)  // ana + derinlik
+        )
+        assertEquals("0", Camera2Utils.mainCamera(cams, B)?.id)
+        assertEquals("2", Camera2Utils.ultraWideCamera(cams)?.id)
+    }
+
+    @Test fun galaxyA56_anaVeUltraGenis() {
+        val B = Camera2Utils.Facing.BACK; val F = Camera2Utils.Facing.FRONT
+        val cams = listOf(
+            cam("0", B, 23.5f, 4080L * 3060), cam("1", F, 24.6f, 4000L * 3000),
+            cam("2", B, 13.4f, 4000L * 3000), cam("3", F, 29.2f, 3472L * 2388)
+        )
+        assertEquals("0", Camera2Utils.mainCamera(cams, B)?.id)
+        assertEquals("1", Camera2Utils.mainCamera(cams, F)?.id)
+        assertEquals("2", Camera2Utils.ultraWideCamera(cams)?.id)
+    }
+
+    @Test fun ultraGenisiKapsayanMantiksalKameraTercihEdilir() {
+        val B = Camera2Utils.Facing.BACK
+        val cams = listOf(cam("0", B, 24f, 12_000_000L), cam("9", B, 24f, 12_000_000L, logical = true, minZoom = 0.6f))
+        assertEquals("9", Camera2Utils.mainCamera(cams, B)?.id)
+    }
 }

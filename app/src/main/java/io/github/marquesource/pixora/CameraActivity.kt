@@ -377,7 +377,8 @@ class CameraActivity : AppCompatActivity() {
             val resName = if (selectedVideoRes == "uhd") "4K" else "1080P"
             binding.pillQuickSettings.text = "📹 $resName • ${selectedVideoFps} FPS ▾"
         } else {
-            val resText = if (is50MpEnabled) "50MP" else "12MP"
+            val mp = if (::camera.isInitialized) camera.photoMegapixels(is50MpEnabled) else 0
+            val resText = if (mp > 0) "${mp}MP" else if (is50MpEnabled) "50MP" else "12MP"
             val rawText = if (isExpertRawEnabled) " • RAW" else ""
             binding.pillQuickSettings.text = "📸 $resText • ${currentAspectRatio.label}$rawText ▾"
         }
@@ -677,6 +678,8 @@ class CameraActivity : AppCompatActivity() {
         fun setAvailable(v: android.view.View, ok: Boolean) { v.isEnabled = ok; v.alpha = if (ok) 1f else 0.35f }
 
         val highRes = camera.supportsHighResPhoto()
+        camera.photoMegapixels(false).takeIf { it > 0 }?.let { p.btnPhoto12Mp.text = "$it MP" }
+        camera.photoMegapixels(true).takeIf { highRes && it > 0 }?.let { p.btnPhoto50Mp.text = "$it MP" }
         if (!highRes && is50MpEnabled) toggleResolution()
         binding.btnResolution.isVisible = highRes
         setAvailable(p.btnPhoto50Mp, highRes)
@@ -697,12 +700,14 @@ class CameraActivity : AppCompatActivity() {
 
         refreshVideoSettingsUi()
         refreshPhotoSettingsUi()
+        updateQuickSettingsPill()
         if (currentMode == CaptureMode.PRO) refreshProLabels()
     }
 
     private fun toggleResolution() {
         is50MpEnabled = !is50MpEnabled
-        binding.btnResolution.text = if (is50MpEnabled) "50MP" else "12MP"
+        val mp = if (::camera.isInitialized) camera.photoMegapixels(is50MpEnabled) else 0
+        binding.btnResolution.text = if (mp > 0) "${mp}MP" else if (is50MpEnabled) "50MP" else "12MP"
         if (is50MpEnabled) {
             binding.btnResolution.setBackgroundResource(R.drawable.bg_glass_button_active)
             binding.btnResolution.setTextColor(android.graphics.Color.BLACK)
@@ -711,7 +716,7 @@ class CameraActivity : AppCompatActivity() {
             binding.btnResolution.setTextColor(android.graphics.Color.WHITE)
         }
         if (::camera.isInitialized) camera.isHighRes50Mp = is50MpEnabled
-        Toast.makeText(this, if (is50MpEnabled) "50MP Ultra Detay Aktif" else "12MP Hızlı Çekim Aktif", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (is50MpEnabled) "${binding.btnResolution.text} yüksek çözünürlük" else "${binding.btnResolution.text} hızlı çekim", Toast.LENGTH_SHORT).show()
     }
 
     private fun cycleAspectRatio() {

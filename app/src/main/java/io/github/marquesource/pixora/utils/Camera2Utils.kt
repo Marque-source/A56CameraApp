@@ -72,7 +72,15 @@ object Camera2Utils {
         val exposureRange: Range<Long>?,
         val maxZoom: Float,
         val activeArraySize: Rect?,
-        val physicalSize: android.util.SizeF?
+        val physicalSize: android.util.SizeF?,
+        /** 35 mm eşdeğer odak uzaklığı (görüş açısının ölçüsü; küçük = geniş). 0 = bilinmiyor. */
+        val equivFocalMm: Float = 0f,
+        /** Sensör piksel sayısı (pixel array). */
+        val pixelCount: Long = 0L,
+        /** CONTROL_ZOOM_RATIO alt sınırı; < 1 ise kamera ultra genişi de kapsıyor demektir. */
+        val minZoomRatio: Float = 1f,
+        /** Normal (BACKWARD_COMPATIBLE) çekim yapabiliyor mu? (Ör. yalnızca güvenli yüz tanıma kamerası değil.) */
+        val isUsable: Boolean = true
     )
 
     fun enumerateCameras(manager: CameraManager): List<CameraInfo> {
@@ -112,30 +120,71 @@ object Camera2Utils {
             val maxZoom = ch.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f
             val activeArray = ch.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
             val physicalSize = ch.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+            val pixelArray = ch.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
+            val diag = physicalSize?.let { kotlin.math.hypot(it.width.toDouble(), it.height.toDouble()) } ?: 0.0
+            val equiv = if (diag > 0.1 && focal > 0f) (focal * 43.27 / diag).toFloat() else 0f
+            val minZoom = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R)
+                ch.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)?.lower ?: 1f else 1f
+            val usable = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)
 
             result.add(
                 CameraInfo(
                     id = id, facing = facing, focalLength = focal, isLogical = isLogical,
                     physicalIds = physicalIds, hardwareLevel = hwLevel, supportsRaw = supportsRaw,
                     minFocusDistance = minFocus, isoRange = isoRange, exposureRange = expRange,
-                    maxZoom = maxZoom, activeArraySize = activeArray, physicalSize = physicalSize
+                    maxZoom = maxZoom, activeArraySize = activeArray, physicalSize = physicalSize,
+                    equivFocalMm = equiv,
+                    pixelCount = (pixelArray?.width?.toLong() ?: 0L) * (pixelArray?.height?.toLong() ?: 0L),
+                    minZoomRatio = minZoom, isUsable = usable
                 )
             )
         }
         return result
     }
 
+    /**
+     * Ana kamerayı seçer; her telefonda doğru lensi bulmak için:
+     *  1. Ultra genişi de kapsayan (yakınlaştırma < 1x) mantıksal kamera varsa onu kullan (Pixel tarzı).
+     *  2. Yoksa normal açılı (35 mm eşdeğeri 18–35 mm) kameralardan en çok piksele sahip olanı seç;
+     *     eşitlikte RAW destekleyen ve donanım seviyesi yüksek olan kazanır.
+     * Eskiden ilk mantıksal kamera seçiliyordu: Redmi Note 10S'de bu, RAW ve tam elle kontrolü olmayan
+     * "ana + derinlik" birleşik kamerası çıktı; ana sensörün kendisi (RAW, LEVEL_3) kullanılmıyordu.
+     */
     fun mainCamera(cameras: List<CameraInfo>, facing: Facing): CameraInfo? {
-        val sameFacing = cameras.filter { it.facing == facing }
-        return sameFacing.firstOrNull { it.isLogical }
-            ?: sameFacing.maxByOrNull { it.focalLength }
+        val same = cameras.filter { it.facing == facing && it.isUsable }
+        same.firstOrNull { it.isLogical && it.minZoomRatio < 0.99f }?.let { return it }
+        val physical = same.filter { !it.isLogical }
+        val normal = physical.filter { it.equivFocalMm in 18f..35f }.ifEmpty { physical }
+        return normal.maxWithOrNull(
+            compareBy<CameraInfo> { it.pixelCount }
+                .thenBy { if (it.supportsRaw) 1 else 0 }
+                .thenBy { levelRank(it.hardwareLevel) }
+        ) ?: same.firstOrNull()
     }
 
-    fun ultraWideCamera(cameras: List<CameraInfo>): CameraInfo? =
-        cameras.filter { it.facing == Facing.BACK }.minByOrNull { it.focalLength }
+    /** En geniş açılı arka kamera (ana kameradan belirgin şekilde geniş olmalı). */
+    fun ultraWideCamera(cameras: List<CameraInfo>): CameraInfo? {
+        val main = mainCamera(cameras, Facing.BACK) ?: return null
+        val back = cameras.filter { it.facing == Facing.BACK && it.isUsable && !it.isLogical && it.id != main.id }
+        return if (main.equivFocalMm > 0f && back.all { it.equivFocalMm > 0f }) {
+            back.filter { it.equivFocalMm < main.equivFocalMm * 0.8f }.minByOrNull { it.equivFocalMm }
+        } else {
+            back.filter { it.focalLength < main.focalLength * 0.8f }.minByOrNull { it.focalLength }
+        }
+    }
 
     fun rawCamera(cameras: List<CameraInfo>, facing: Facing): CameraInfo? =
-        cameras.firstOrNull { it.facing == facing && it.supportsRaw }
+        cameras.firstOrNull { it.facing == facing && it.supportsRaw && it.isUsable }
+
+    /** LEGACY < LIMITED < EXTERNAL < FULL < LEVEL_3 */
+    private fun levelRank(level: Int): Int = when (level) {
+        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY -> 0
+        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> 1
+        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL -> 2
+        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL -> 3
+        CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> 4
+        else -> 1
+    }
 
     fun hardwareLevelName(level: Int): String = when (level) {
         CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> "LEVEL_3"

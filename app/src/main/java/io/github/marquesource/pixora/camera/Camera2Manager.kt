@@ -238,7 +238,9 @@ class Camera2Manager(
         val ch = systemManager.getCameraCharacteristics(info.id)
         characteristics = ch
         if (io.github.marquesource.pixora.BuildConfig.DEBUG) {
-            io.github.marquesource.pixora.utils.SamsungVendorTagsExplorer.dumpCameraVendorTags(ch, info.id)
+            if (android.os.Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+                io.github.marquesource.pixora.utils.SamsungVendorTagsExplorer.dumpCameraVendorTags(ch, info.id)
+            }
         }
         exposure.readRanges(ch)
         whiteBalance.readCharacteristics(ch)
@@ -423,6 +425,13 @@ class Camera2Manager(
         val sizes = (map.getHighResolutionOutputSizes(ImageFormat.JPEG) ?: emptyArray()) +
             (map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray())
         return sizes.any { it.width.toLong() * it.height > 20_000_000L }
+    }
+
+    /** Fotoğrafın gerçek megapiksel değeri (seçili en-boy oranı ve çözünürlük moduna göre). */
+    fun photoMegapixels(highRes: Boolean = isHighRes50Mp): Int {
+        val ch = characteristics ?: return 0
+        val size = Camera2Utils.largestOutputSizeWithAspect(ch, ImageFormat.JPEG, aspectRatio, highRes) ?: return 0
+        return Math.round(size.width.toDouble() * size.height / 1_000_000.0).toInt()
     }
 
     /** Video sabitleme (EIS) bu kamerada var mı? */
@@ -1246,8 +1255,8 @@ class Camera2Manager(
             CameraModule.ULTRA_WIDE -> {
                 val uw = Camera2Utils.ultraWideCamera(cameras)
                 when {
-                    uw != null && uw.id != currentInfo?.id && uw.focalLength < (currentInfo?.focalLength ?: 0f) -> openCamera(uw)
                     zoom.minZoom() < 0.99f -> setZoomRatio(zoom.minZoom())
+                    uw != null && uw.id != currentInfo?.id -> openCamera(uw)
                     else -> {
                         // Samsung bazı modellerde ultra geniş lensi üçüncü taraf uygulamalara açmıyor
                         onError?.invoke("Bu telefonda ultra geniş lens uygulamalara açık değil")
