@@ -47,7 +47,21 @@ object NightTone {
 
         // sRGB → doğrusal (2.2 gama yaklaşıklığı; ISP çıktısı için yeterli)
         Core.pow(f, 2.2, f)
+        return renderLinear(f, targetKey, maxGain, saturation, grayWorld)
+    }
 
+    /**
+     * Doğrusal ışıktaki 32FC3 BGR görüntüyü (0..1, beyaz dengesi uygulanmış) ton eşler.
+     * RAW gece yolu buraya doğrudan gelir. [f] yerinde değiştirilir ve serbest bırakılır.
+     * @return 8UC3 BGR (sRGB)
+     */
+    fun renderLinear(
+        f: Mat,
+        targetKey: Double = TARGET_KEY,
+        maxGain: Double = MAX_GAIN,
+        saturation: Double = SATURATION,
+        grayWorld: Double = GRAY_WORLD
+    ): Mat {
         // Karanlıkta telefonun beyaz dengesi çoğu zaman tutmuyor (burst kareleri mor/yeşil kalıyor).
         // Gri dünya varsayımına doğru KISMİ düzeltme: ortam ışığının rengi korunur, aşırı sapma alınır.
         if (grayWorld > 0.0) {

@@ -69,6 +69,9 @@ class Camera2Manager(
 ) {
     private val TAG = "Camera2Manager"
     private val CONVERGENCE_TIMEOUT_MS = 1200L
+    private val RAW_NIGHT_FRAMES = 6
+    /** Elde tutarken kare başına en uzun süre (Note 10S'de OIS yok). */
+    private val RAW_NIGHT_MAX_EXP_NS = 80_000_000L
     private val systemManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
     private var bgThread: HandlerThread? = null
@@ -163,6 +166,29 @@ class Camera2Manager(
                 restartSessionForAspectOrRes()
             }
         }
+
+    /**
+     * Gece modunda ham (RAW) çok kareli birleştirme kullanılsın mı? Etkinlik gece moduna geçince
+     * true yapar. Yalnızca RAW + elle sensör kontrolü olan telefonlarda oturuma RAW akışı eklenir;
+     * diğerlerinde (ör. Galaxy A56) hiçbir şey değişmez ve YUV gece yolu kullanılır.
+     */
+    var nightRawMode: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                if (supportsRawNight() && !rawEnabled) restartSessionForAspectOrRes()
+            }
+        }
+
+    /** Bu kamerada RAW gece modu kullanılabilir mi? */
+    fun supportsRawNight(): Boolean {
+        val ch = characteristics ?: return false
+        if (currentInfo?.supportsRaw != true || rawStreamUnsupported) return false
+        val caps = ch.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: return false
+        val map = ch.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
+        return caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) &&
+            !map.getOutputSizes(ImageFormat.RAW_SENSOR).isNullOrEmpty()
+    }
 
     /** RAW akışı denenip oturum kurulamadıysa true — aynı kamerada tekrar denenmez. */
     private var rawStreamUnsupported = false
@@ -305,7 +331,8 @@ class Camera2Manager(
     }
 
     private fun createStandardPreviewSession() {
-        val wantRaw = rawEnabled && currentInfo?.supportsRaw == true && !rawStreamUnsupported
+        val wantRaw = (rawEnabled || (nightRawMode && supportsRawNight())) &&
+            currentInfo?.supportsRaw == true && !rawStreamUnsupported
         createStandardPreviewSession(withRaw = wantRaw)
     }
 
@@ -652,6 +679,25 @@ class Camera2Manager(
         val ch = characteristics ?: return onError()
         val orientation = jpegOrientation(ch, deviceRotation)
 
+        if (nightRawMode && supportsRawNight() && imageReaders?.rawSurface() != null) {
+            captureNightRaw(ch, orientation, location, onProgress, onSaved, onError = {
+                // RAW yolu başarısız olursa kullanıcı eli boş kalmasın: YUV gece yoluna düş
+                Log.w(TAG, "RAW gece başarısız, YUV gece yoluna geçiliyor")
+                captureNightYuv(ch, orientation, location, onProgress, onSaved, onError)
+            })
+            return
+        }
+        captureNightYuv(ch, orientation, location, onProgress, onSaved, onError)
+    }
+
+    private fun captureNightYuv(
+        ch: CameraCharacteristics,
+        orientation: Int,
+        location: Location?,
+        onProgress: ((String) -> Unit)?,
+        onSaved: (Uri) -> Unit,
+        onError: () -> Unit
+    ) {
         val iso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 800
         val exposureNs = lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 40_000_000L
         val frameCount = 5
@@ -708,6 +754,232 @@ class Camera2Manager(
                 mainPost { onError() }
             }
         )
+    }
+
+    // ======================================================================== RAW gece
+
+    /**
+     * RAW gece çekimi: [RAW_NIGHT_FRAMES] ham kare elle pozlamayla çekilir, [RawNightProcessor] ile
+     * hizalanıp birleştirilir. Telefonun işlediği karelerden çok daha temiz sonuç verir; yalnızca
+     * RAW + elle sensör kontrolü olan telefonlarda çalışır (bkz. [supportsRawNight]).
+     */
+    private fun captureNightRaw(
+        ch: CameraCharacteristics,
+        orientation: Int,
+        location: Location?,
+        onProgress: ((String) -> Unit)?,
+        onSaved: (Uri) -> Unit,
+        onError: () -> Unit
+    ) {
+        val device = cameraDevice ?: return onError()
+        val readers = imageReaders ?: return onError()
+        val rawSurface = readers.rawSurface() ?: return onError()
+        val rawReader = readers.rawReader ?: return onError()
+        if (!burstInProgress.compareAndSet(false, true)) return onError()
+
+        // ---- Pozlama planı: önizlemenin ölçtüğü ışık miktarını koru, süreyi uzatıp ISO'yu düşür
+        val isoRange = ch.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) ?: android.util.Range(100, 3200)
+        val expRange = ch.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) ?: android.util.Range(100_000L, 1_000_000_000L)
+        val mIso = lastResult?.get(CaptureResult.SENSOR_SENSITIVITY) ?: 800
+        val mExp = lastResult?.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 33_000_000L
+        val target = mIso.toDouble() * mExp
+        val cap = minOf(expRange.upper, RAW_NIGHT_MAX_EXP_NS).toDouble()
+        var exp = (target / isoRange.lower).coerceIn(expRange.lower.toDouble(), cap)
+        if (target / exp > isoRange.upper) exp = minOf(target / isoRange.upper, cap)
+        val expNs = exp.toLong()
+        val iso = (target / exp).toInt().coerceIn(isoRange.lower, isoRange.upper)
+        val n = RAW_NIGHT_FRAMES
+        Log.i(TAG, "🌙 RAW gece: $n kare, ISO=$iso, süre=${expNs / 1_000_000}ms (ölçüm ISO=$mIso, ${mExp / 1_000_000}ms)")
+        mainPost { onProgress?.invoke("RAW gece çekimi ($n kare)...") }
+
+        val w = rawReader.width; val h = rawReader.height
+        val frames = java.util.TreeMap<Long, org.opencv.core.Mat>()
+        val results = java.util.TreeMap<Long, TotalCaptureResult>()
+        val done = AtomicBoolean(false)
+        val rowBuf = ShortArray(w * h)
+
+        fun restoreListener() {
+            imageReaders?.setRawImageAvailableListener { image -> onRawAvailable(image) }
+        }
+
+        fun fail(msg: String) {
+            if (done.getAndSet(true)) return
+            Log.e(TAG, "RAW gece hatası: $msg")
+            synchronized(frames) { frames.values.forEach { it.release() }; frames.clear() }
+            restoreListener()
+            burstInProgress.set(false)
+            mainPost { onError() }
+        }
+
+        fun finish() {
+            if (done.getAndSet(true)) return
+            restoreListener()
+            burstInProgress.set(false)
+            val pairs = synchronized(frames) {
+                frames.entries.mapNotNull { (ts, m) -> results[ts]?.let { m to it } }.also {
+                    frames.values.filter { f -> it.none { p -> p.first === f } }.forEach { f -> f.release() }
+                    frames.clear()
+                }
+            }
+            if (pairs.size < 2) {
+                pairs.forEach { it.first.release() }
+                Log.w(TAG, "RAW gece: yeterli kare yok (${pairs.size})")
+                mainPost { onError() }
+                return
+            }
+            mainPost { onProgress?.invoke("DONE_CAPTURE") }
+            procHandler.post { processRawNight(ch, pairs, orientation, location, onProgress, onSaved, onError) }
+        }
+
+        fun checkComplete() {
+            val ready = synchronized(frames) { frames.keys.count { results.containsKey(it) } }
+            if (ready >= n) finish()
+        }
+
+        readers.setRawImageAvailableListener { image ->
+            try {
+                if (done.get()) return@setRawImageAvailableListener
+                val plane = image.planes[0]
+                val buf = plane.buffer.order(java.nio.ByteOrder.nativeOrder())
+                val mat = org.opencv.core.Mat(h, w, org.opencv.core.CvType.CV_16UC1)
+                if (plane.rowStride == w * 2) {
+                    buf.asShortBuffer().get(rowBuf, 0, w * h)
+                } else {
+                    val sb = buf.asShortBuffer()
+                    for (r in 0 until h) { sb.position(r * plane.rowStride / 2); sb.get(rowBuf, r * w, w) }
+                }
+                mat.put(0, 0, rowBuf)
+                synchronized(frames) { frames[image.timestamp] = mat }
+            } catch (e: Throwable) {
+                Log.e(TAG, "RAW kare kopyalanamadı", e)
+            } finally {
+                try { image.close() } catch (_: Throwable) {}
+            }
+            checkComplete()
+        }
+
+        val requests = (0 until n).map {
+            device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                addTarget(rawSurface)
+                set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+                set(CaptureRequest.SENSOR_EXPOSURE_TIME, expNs)
+                set(CaptureRequest.SENSOR_FRAME_DURATION, expNs)
+                set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
+                set(CaptureRequest.CONTROL_AWB_LOCK, true)
+                if (focus.hasAf) set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                set(CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE, CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON)
+                set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
+                zoom.applyTo(this)
+            }.build()
+        }
+
+        bgHandler?.postDelayed({
+            if (done.get()) return@postDelayed
+            val got = synchronized(frames) { frames.keys.count { results.containsKey(it) } }
+            if (got >= 2) finish() else fail("zaman aşımı ($got kare)")
+        }, 3000L + n * expNs / 1_000_000L)
+
+        try {
+            sessionManager?.captureBurst(requests, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, result: TotalCaptureResult) {
+                    val ts = result.get(CaptureResult.SENSOR_TIMESTAMP) ?: return
+                    synchronized(frames) { results[ts] = result }
+                    checkComplete()
+                }
+                override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, f: CaptureFailure) {
+                    Log.w(TAG, "RAW gece karesi başarısız: ${f.reason}")
+                }
+            }) ?: fail("oturum yok")
+        } catch (e: Exception) {
+            fail("burst başlatılamadı: ${e.message}")
+        }
+    }
+
+    private fun processRawNight(
+        ch: CameraCharacteristics,
+        pairs: List<Pair<org.opencv.core.Mat, TotalCaptureResult>>,
+        orientation: Int,
+        location: Location?,
+        onProgress: ((String) -> Unit)?,
+        onSaved: (Uri) -> Unit,
+        onError: () -> Unit
+    ) {
+        try {
+            pipeline.initOpenCV()
+            val ref = pairs.first().second
+            val params = rawParams(ch, ref)
+            val dump = io.github.marquesource.pixora.pipeline.DebugDump(context, "raw_gece")
+            dump.text("bilgi.txt", "kare=${pairs.size} iso=${ref.get(CaptureResult.SENSOR_SENSITIVITY)} " +
+                "süre=${ref.get(CaptureResult.SENSOR_EXPOSURE_TIME)} cfa=${params.cfa} siyah=${params.blackLevel.joinToString()} " +
+                "beyaz=${params.whiteLevel} wb=${params.wbGains.joinToString()} ccm=${params.ccm.joinToString()} " +
+                "gölge=${params.shading?.size()} gürültü=${params.noiseScale},${params.noiseOffset} cihaz=${Build.MODEL}")
+            mainPost { onProgress?.invoke("Ham kareler birleştiriliyor...") }
+            val t0 = System.currentTimeMillis()
+            val result = io.github.marquesource.pixora.pipeline.RawNightProcessor.process(
+                pairs.map { it.first }.toMutableList(), params,
+                keepMergedBayer = rawEnabled,
+                dump = if (dump.enabled) { name, m -> dump.mat(name, m) } else null
+            )
+            params.shading?.release()
+            Log.i(TAG, "RAW gece işlendi: ${System.currentTimeMillis() - t0}ms, ${result.usedFrames} kare, " +
+                "ağırlık=%.2f kaymalar=${result.shifts}".format(result.meanWeight))
+            dump.mat("4_son", result.image)
+
+            val bmp = io.github.marquesource.pixora.pipeline.YuvConverter.matToBitmap(result.image)
+            result.image.release()
+            val uri = pipeline.saveJpeg(bmp, 95, ref, location, orientation)
+            bmp.recycle()
+
+            result.mergedBayer?.let { bayer ->
+                val shorts = ShortArray((bayer.total()).toInt()); bayer.get(0, 0, shorts)
+                val bb = java.nio.ByteBuffer.allocateDirect(shorts.size * 2).order(java.nio.ByteOrder.nativeOrder())
+                bb.asShortBuffer().put(shorts)
+                io.github.marquesource.pixora.utils.DngHelper.saveDngBuffer(
+                    context, ch, ref, bb, bayer.cols(), bayer.rows(), location, orientation)
+                bayer.release()
+            }
+            mainPost { if (uri != null) onSaved(uri) else onError() }
+        } catch (e: Throwable) {
+            Log.e(TAG, "RAW gece işleme hatası", e)
+            pairs.forEach { try { it.first.release() } catch (_: Throwable) {} }
+            mainPost { onError() }
+        }
+    }
+
+    /** Karakteristikler + çekim sonucundan RAW işleme parametreleri. */
+    private fun rawParams(ch: CameraCharacteristics, r: TotalCaptureResult): io.github.marquesource.pixora.pipeline.RawNightProcessor.Params {
+        val cfa = ch.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) ?: 0
+        val dynBlack = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) r.get(CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL) else null
+        val pattern = ch.get(CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN)
+        val black = DoubleArray(4) { pos ->
+            dynBlack?.getOrNull(pos)?.toDouble()
+                ?: pattern?.getOffsetForIndex(pos % 2, pos / 2)?.toDouble() ?: 64.0
+        }
+        val dynWhite = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) r.get(CaptureResult.SENSOR_DYNAMIC_WHITE_LEVEL) else null
+        val white = (dynWhite ?: ch.get(CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL) ?: 1023).toDouble()
+        val g = r.get(CaptureResult.COLOR_CORRECTION_GAINS)
+        val wb = if (g != null) doubleArrayOf(g.red.toDouble(), (g.greenEven + g.greenOdd) / 2.0, g.blue.toDouble())
+            else doubleArrayOf(2.0, 1.0, 1.6)
+        val t = r.get(CaptureResult.COLOR_CORRECTION_TRANSFORM)
+        val ccm = DoubleArray(9) { i ->
+            t?.getElement(i % 3, i / 3)?.toDouble() ?: if (i % 4 == 0) 1.0 else 0.0
+        }
+        val lsm = r.get(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+        val shading = lsm?.let { m ->
+            val mat = org.opencv.core.Mat(m.rowCount, m.columnCount, org.opencv.core.CvType.CV_32FC4)
+            val data = FloatArray(m.rowCount * m.columnCount * 4)
+            var i = 0
+            for (row in 0 until m.rowCount) for (col in 0 until m.columnCount) for (c in 0 until 4) {
+                data[i++] = m.getGainFactor(c, col, row)
+            }
+            mat.put(0, 0, data); mat
+        }
+        val np = r.get(CaptureResult.SENSOR_NOISE_PROFILE)
+        val nS = np?.map { it.first }?.average()
+        val nO = np?.map { it.second }?.average()
+        return io.github.marquesource.pixora.pipeline.RawNightProcessor.Params(cfa, black, white, wb, ccm, shading, nS, nO)
     }
 
     /**

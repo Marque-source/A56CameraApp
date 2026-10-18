@@ -314,6 +314,10 @@ class ImageProcessingPipeline(private val context: Context) {
         }
     }
 
+    /** Dışarıdan (ör. RAW gece yolu) üretilmiş görüntüyü aynı kayıt akışıyla galeriye yazar. */
+    fun saveJpeg(bitmap: Bitmap, quality: Int, captureResult: TotalCaptureResult?, location: Location?, orientation: Int): Uri? =
+        saveToGallery(bitmap, quality, captureResult, location, orientation)
+
     private fun saveToGallery(
         bitmap: Bitmap,
         quality: Int,

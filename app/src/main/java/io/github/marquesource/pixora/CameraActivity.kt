@@ -325,6 +325,8 @@ class CameraActivity : AppCompatActivity() {
         if (isRecording || timerRunning) return
         val wasVideo = currentMode.isVideo
         currentMode = mode
+        // RAW destekli telefonlarda gece modu ham kareleri birleştirir (oturuma RAW akışı eklenir)
+        if (::camera.isInitialized) camera.nightRawMode = (mode == CaptureMode.NIGHT)
         // Video/time-lapse 16:9 kaydedilir; önizleme de 16:9 olsun ki görülen = kaydedilen
         if (::camera.isInitialized && mode.isVideo != wasVideo) {
             camera.aspectRatio = if (mode.isVideo) AspectRatio.RATIO_16_9 else currentAspectRatio
